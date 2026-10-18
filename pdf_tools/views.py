@@ -1,20 +1,29 @@
-import os
-import shutil
-import tempfile
+import base64
+import csv
+import io
+import json
 import logging
+import math
+import os
+import re
+import shutil
+import subprocess
+import tempfile
 import zipfile
+from functools import wraps
+from html.parser import HTMLParser
 from pathlib import Path
+from xml.sax.saxutils import escape as _xml_escape
 
 from django.conf import settings
 from django.http import FileResponse, JsonResponse
 from django.utils.text import get_valid_filename
-from django.views.decorators.http import require_POST
 from django.views.decorators.csrf import csrf_exempt
-from pathlib import Path
-from django.utils.text import get_valid_filename
+from django.views.decorators.http import require_POST
 
 from pypdf import PdfReader, PdfWriter
-from pypdf.errors import PyPdfError
+from pypdf.errors import DependencyError, PyPdfError
+from pypdf.generic import RectangleObject
 from pdf2image import convert_from_path, pdfinfo_from_path
 from pdf2image.exceptions import (
     PDFInfoNotInstalledError,
@@ -25,17 +34,104 @@ from pdf2image.exceptions import (
 
 logger = logging.getLogger(__name__)
 
-# --- Settings for Merge PDF ---
-MAX_FILES = getattr(settings, "PDF_MERGE_MAX_FILES", 20)
-MAX_FILE_SIZE = getattr(settings, "PDF_MERGE_MAX_FILE_SIZE", 50 * 1024 * 1024)
+# ======================================================================
+# Global Limits (Increased for Large Gazette PDFs & Multi-File Uploads)
+# ======================================================================
+MAX_FILES = getattr(settings, "PDF_MERGE_MAX_FILES", 50)
+MAX_FILE_SIZE = getattr(settings, "PDF_MERGE_MAX_FILE_SIZE", 200 * 1024 * 1024)
 
-# --- Settings for PDF to JPG ---
-JPG_MAX_FILE_SIZE = getattr(settings, "PDF_TO_JPG_MAX_FILE_SIZE", 50 * 1024 * 1024)
-JPG_MAX_PAGES = getattr(settings, "PDF_TO_JPG_MAX_PAGES", 100)
+JPG_MAX_FILE_SIZE = getattr(settings, "PDF_TO_JPG_MAX_FILE_SIZE", 150 * 1024 * 1024)
+JPG_MAX_PAGES = getattr(settings, "PDF_TO_JPG_MAX_PAGES", 300)
 JPG_DEFAULT_DPI = getattr(settings, "PDF_TO_JPG_DEFAULT_DPI", 150)
 JPG_MAX_DPI = getattr(settings, "PDF_TO_JPG_MAX_DPI", 300)
-JPG_QUALITY = getattr(settings, "PDF_TO_JPG_JPEG_QUALITY", 85)
-POPPLER_TIMEOUT = getattr(settings, "PDF_TO_JPG_TIMEOUT", 60)
+JPG_QUALITY = getattr(settings, "PDF_TO_JPG_JPEG_QUALITY", 88)
+POPPLER_TIMEOUT = getattr(settings, "PDF_TO_JPG_TIMEOUT", 120)
+
+PROTECT_MAX_FILE_SIZE = getattr(settings, "PDF_PROTECT_MAX_FILE_SIZE", 150 * 1024 * 1024)
+PROTECT_MAX_PASSWORD_LEN = getattr(settings, "PDF_PROTECT_MAX_PASSWORD_LENGTH", 128)
+COMPRESS_MAX_FILE_SIZE = getattr(settings, "PDF_COMPRESS_MAX_FILE_SIZE", 200 * 1024 * 1024)
+COMPRESS_TIMEOUT = getattr(settings, "PDF_COMPRESS_TIMEOUT", 180)
+GS_BINARY = getattr(settings, "GHOSTSCRIPT_BINARY", "gs")
+
+COMPRESS_LEVELS = {
+    "low": "/printer",
+    "medium": "/ebook",
+    "high": "/screen",
+}
+
+TEXT_MAX_FILE_SIZE = getattr(settings, "PDF_TEXT_MAX_FILE_SIZE", 150 * 1024 * 1024)
+TEXT_MAX_PAGES = getattr(settings, "PDF_TEXT_MAX_PAGES", 2000)
+WORD_MAX_FILE_SIZE = getattr(settings, "PDF_WORD_MAX_FILE_SIZE", 100 * 1024 * 1024)
+WORD_MAX_PAGES = getattr(settings, "PDF_WORD_MAX_PAGES", 300)
+SPEECH_MAX_FILE_SIZE = getattr(settings, "PDF_SPEECH_MAX_FILE_SIZE", 100 * 1024 * 1024)
+SPEECH_MAX_CHARS = getattr(settings, "PDF_SPEECH_MAX_CHARS", 50000)
+SPEECH_TIMEOUT = getattr(settings, "PDF_SPEECH_TIMEOUT", 60)
+
+SPLIT_MAX_FILE_SIZE = getattr(settings, "PDF_SPLIT_MAX_FILE_SIZE", 200 * 1024 * 1024)
+SPLIT_MAX_PAGES = getattr(settings, "PDF_SPLIT_MAX_PAGES", 10000)
+SPLIT_MAX_RANGES = getattr(settings, "PDF_SPLIT_MAX_RANGES", 500)
+SPLIT_MAX_PAGES_STRING = getattr(settings, "PDF_SPLIT_MAX_PAGES_STRING", 2000)
+UNLOCK_MAX_FILE_SIZE = getattr(settings, "PDF_UNLOCK_MAX_FILE_SIZE", 200 * 1024 * 1024)
+UNLOCK_MAX_PASSWORD_LEN = getattr(settings, "PDF_UNLOCK_MAX_PASSWORD_LENGTH", 128)
+
+EXCEL_MAX_FILE_SIZE = getattr(settings, "PDF_EXCEL_MAX_FILE_SIZE", 100 * 1024 * 1024)
+EXCEL_MAX_PAGES = getattr(settings, "PDF_EXCEL_MAX_PAGES", 500)
+EXCEL_MAX_CELLS = getattr(settings, "PDF_EXCEL_MAX_CELLS", 300_000)
+XLSX_MAX_FILE_SIZE = getattr(settings, "EXCEL_PDF_MAX_FILE_SIZE", 50 * 1024 * 1024)
+XLSX_MAX_SHEETS = getattr(settings, "EXCEL_PDF_MAX_SHEETS", 30)
+XLSX_MAX_CELLS = getattr(settings, "EXCEL_PDF_MAX_CELLS", 100_000)
+XLSX_MAX_CELL_CHARS = getattr(settings, "EXCEL_PDF_MAX_CELL_CHARS", 80)
+
+DOCX_MAX_FILE_SIZE = getattr(settings, "WORD_PDF_MAX_FILE_SIZE", 50 * 1024 * 1024)
+PPTX_MAX_FILE_SIZE = getattr(settings, "PPTX_PDF_MAX_FILE_SIZE", 100 * 1024 * 1024)
+PPTX_MAX_SLIDES = getattr(settings, "PPTX_PDF_MAX_SLIDES", 300)
+CSV_MAX_FILE_SIZE = getattr(settings, "CSV_PDF_MAX_FILE_SIZE", 50 * 1024 * 1024)
+HTML_MAX_FILE_SIZE = getattr(settings, "HTML_PDF_MAX_FILE_SIZE", 20 * 1024 * 1024)
+
+OCR_MAX_FILE_SIZE = getattr(settings, "PDF_OCR_MAX_FILE_SIZE", 100 * 1024 * 1024)
+OCR_MAX_PAGES = getattr(settings, "PDF_OCR_MAX_PAGES", 100)
+OCR_TIMEOUT = getattr(settings, "PDF_OCR_TIMEOUT", 180)
+WATERMARK_MAX_FILE_SIZE = getattr(settings, "PDF_WATERMARK_MAX_FILE_SIZE", 150 * 1024 * 1024)
+SIGN_MAX_FILE_SIZE = getattr(settings, "PDF_SIGN_MAX_FILE_SIZE", 150 * 1024 * 1024)
+PAGENUM_MAX_FILE_SIZE = getattr(settings, "PDF_PAGENUM_MAX_FILE_SIZE", 200 * 1024 * 1024)
+
+PDF_FONT_PATH = getattr(settings, "PDF_FONT_PATH", None)
+IMAGE_MAX_FILE_SIZE = getattr(settings, "IMAGE_PDF_MAX_FILE_SIZE", 50 * 1024 * 1024)
+IMAGE_MAX_FILES = getattr(settings, "IMAGE_PDF_MAX_FILES", 50)
+IMAGE_MAX_PIXELS = getattr(settings, "IMAGE_PDF_MAX_PIXELS", 80_000_000)
+CROP_MAX_FILE_SIZE = getattr(settings, "PDF_CROP_MAX_FILE_SIZE", 200 * 1024 * 1024)
+CROP_MAX_PAGES = getattr(settings, "PDF_CROP_MAX_PAGES", 10000)
+
+XLSX_EXTENSIONS = {".xlsx", ".xlsm"}
+DOCX_EXTENSIONS = {".docx"}
+PPTX_EXTENSIONS = {".pptx", ".ppt"}
+CSV_EXTENSIONS = {".csv", ".tsv", ".txt"}
+HTML_EXTENSIONS = {".html", ".htm"}
+IMAGE_EXTENSIONS = {".jpg", ".jpeg", ".png", ".webp", ".bmp", ".gif", ".tif", ".tiff"}
+EXCEL_MIME = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+
+NO_TEXT_MESSAGE = (
+    "No extractable text found. The PDF is probably scanned images and needs OCR first."
+)
+
+_PAGE_TOKEN_RE = re.compile(r"^(\d{1,6})(?:-(\d{1,6}))?$")
+
+
+# ======================================================================
+# Optional Clerk Auth Guard (Enforced if CLERK_REQUIRE_AUTH=True in settings)
+# ======================================================================
+def clerk_authenticated(view_func):
+    @wraps(view_func)
+    def _wrapped(request, *args, **kwargs):
+        require_auth = getattr(settings, "CLERK_REQUIRE_AUTH", False)
+        auth_header = request.headers.get("Authorization", "")
+        if require_auth:
+            if not auth_header.startswith("Bearer ") or len(auth_header.split(" ", 1)[1].strip()) < 20:
+                return JsonResponse({"error": "Authentication required. Please sign in."}, status=401)
+        response = view_func(request, *args, **kwargs)
+        response["Access-Control-Expose-Headers"] = "Content-Disposition, X-Original-Size, X-Compressed-Size"
+        return response
+    return _wrapped
 
 
 class PDFMergeError(Exception):
@@ -47,58 +143,37 @@ class PDFMergeError(Exception):
 
 
 class SelfCleaningFileResponse(FileResponse):
-    """
-    FileResponse that deletes its temp directory once the response is closed.
-    """
+    """FileResponse that deletes its temp directory once the response is closed."""
     def __init__(self, *args, cleanup_dir=None, **kwargs):
         self._cleanup_dir = cleanup_dir
         super().__init__(*args, **kwargs)
 
     def close(self):
         try:
-            super().close()  # closes the open file handle
+            super().close()
         finally:
             if self._cleanup_dir:
                 shutil.rmtree(self._cleanup_dir, ignore_errors=True)
                 self._cleanup_dir = None
 
 
-def _save_upload(upload, dest_path):
-    """Write an uploaded file to disk in chunks and validate it looks like a PDF."""
+# ======================================================================
+# Core Validation & File Helpers
+# ======================================================================
+def _save_pdf_upload(upload, dest_path, max_size=MAX_FILE_SIZE):
+    if not upload.name.lower().endswith(".pdf"):
+        raise PDFMergeError(f"'{upload.name}' is not a .pdf file.", status=415)
     if upload.size == 0:
         raise PDFMergeError(f"'{upload.name}' is empty.")
-    if upload.size > MAX_FILE_SIZE:
+    if upload.size > max_size:
         raise PDFMergeError(
-            f"'{upload.name}' exceeds the {MAX_FILE_SIZE // (1024 * 1024)} MB limit.",
-            status=413,
+            f"'{upload.name}' exceeds the {max_size // (1024 * 1024)} MB limit.", status=413
         )
 
-    # Cheap sanity check on the header ("%PDF-") before writing anything
-    header = upload.read(5)
+    header = upload.read(1024)
     upload.seek(0)
-    if header != b"%PDF-":
-        raise PDFMergeError(f"'{upload.name}' is not a valid PDF file.")
-
-    with open(dest_path, "wb") as out:
-        for chunk in upload.chunks():
-            out.write(chunk)
-
-
-def _validate_and_save_single_pdf(upload, dest_path):
-    """Validate a single uploaded file for PDF to JPG conversion."""
-    if not upload.name.lower().endswith(".pdf"):
-        raise PDFMergeError("Only .pdf files are accepted.", status=415)
-    if upload.size == 0:
-        raise PDFMergeError("The uploaded file is empty.")
-    if upload.size > JPG_MAX_FILE_SIZE:
-        raise PDFMergeError(
-            f"File exceeds the {JPG_MAX_FILE_SIZE // (1024 * 1024)} MB limit.", status=413
-        )
-
-    header = upload.read(5)
-    upload.seek(0)
-    if header != b"%PDF-":
-        raise PDFMergeError("The uploaded file is not a valid PDF.", status=415)
+    if b"%PDF-" not in header[:1024]:
+        raise PDFMergeError(f"'{upload.name}' is not a valid PDF file.", status=415)
 
     with open(dest_path, "wb") as out:
         for chunk in upload.chunks():
@@ -106,7 +181,6 @@ def _validate_and_save_single_pdf(upload, dest_path):
 
 
 def _parse_dpi(raw_value):
-    """Optional 'dpi' form field, clamped to a safe range to protect server memory."""
     if not raw_value:
         return JPG_DEFAULT_DPI
     try:
@@ -118,17 +192,136 @@ def _parse_dpi(raw_value):
     return dpi
 
 
-# ==========================================
+def _parse_page_ranges(raw):
+    raw = (raw or "").strip()
+    if not raw:
+        raise PDFMergeError("'pages' is required, for example: 1,3,5-7.")
+    if len(raw) > SPLIT_MAX_PAGES_STRING:
+        raise PDFMergeError("'pages' value is too long.")
+
+    normalized = re.sub(r"[.;\s]+", ",", raw.strip())
+    tokens = [t.strip() for t in normalized.split(",") if t.strip()]
+
+    if not tokens:
+        raise PDFMergeError("Provide at least one page number, e.g. 1,3,5-7.")
+    if len(tokens) > SPLIT_MAX_RANGES:
+        raise PDFMergeError(f"Too many page ranges; the maximum is {SPLIT_MAX_RANGES}.")
+
+    ranges = []
+    for token in tokens:
+        match = _PAGE_TOKEN_RE.match(token)
+        if not match:
+            raise PDFMergeError(
+                f"Invalid page selection '{token}'. Use numbers or ranges like 1,3,5-7."
+            )
+        start = int(match.group(1))
+        end = int(match.group(2)) if match.group(2) else start
+        if start < 1 or end < 1:
+            raise PDFMergeError("Page numbers start at 1.")
+        if end < start:
+            start, end = end, start
+        ranges.append((start, end))
+    return ranges
+
+
+def _expand_page_ranges(ranges, total_pages):
+    indexes, seen = [], set()
+    for start, end in ranges:
+        if end > total_pages:
+            bad = end if start <= total_pages else start
+            raise PDFMergeError(
+                f"Page {bad} is out of range; the PDF has {total_pages} page(s)."
+            )
+        for page_no in range(start, end + 1):
+            if page_no not in seen:
+                seen.add(page_no)
+                indexes.append(page_no - 1)
+    return indexes
+
+
+def _run_single_pdf_tool(request, *, prefix, max_size, processor):
+    upload = request.FILES.get("file")
+    if upload is None:
+        return JsonResponse({"error": "No file uploaded. Use the 'file' field."}, status=400)
+
+    work_dir = tempfile.mkdtemp(prefix=prefix, dir=getattr(settings, "PDF_TEMP_DIR", None))
+    response = None
+
+    try:
+        input_path = os.path.join(work_dir, "input.pdf")
+        _save_pdf_upload(upload, input_path, max_size)
+
+        output_path, extension, content_type = processor(request, input_path, work_dir)
+
+        if not os.path.exists(output_path) or os.path.getsize(output_path) == 0:
+            raise PDFMergeError("Conversion produced no output. The PDF may be corrupted.")
+
+        base_name = get_valid_filename(Path(upload.name).stem) or "document"
+        response = SelfCleaningFileResponse(
+            open(output_path, "rb"),
+            as_attachment=True,
+            filename=f"{base_name}{extension}",
+            content_type=content_type,
+            cleanup_dir=work_dir,
+        )
+        return response
+
+    except PDFMergeError as exc:
+        return JsonResponse({"error": exc.message}, status=exc.status)
+    except Exception:
+        logger.exception("Unexpected error in %s tool", prefix.rstrip("_"))
+        return JsonResponse({"error": "Internal error while processing the PDF."}, status=500)
+    finally:
+        if response is None:
+            shutil.rmtree(work_dir, ignore_errors=True)
+
+
+def _check_pdf_readable(pdf_path, max_pages):
+    try:
+        reader = PdfReader(pdf_path)
+        if reader.is_encrypted:
+            raise PDFMergeError("The PDF is password protected. Unlock it first.")
+        page_count = len(reader.pages)
+    except PDFMergeError:
+        raise
+    except (PyPdfError, ValueError, KeyError, OSError, RecursionError) as exc:
+        logger.warning("Unreadable PDF: %s", exc)
+        raise PDFMergeError("The PDF is corrupted or unreadable.")
+
+    if page_count == 0:
+        raise PDFMergeError("The PDF contains no pages.")
+    if page_count > max_pages:
+        raise PDFMergeError(
+            f"PDF has {page_count} pages; the maximum is {max_pages}.", status=413
+        )
+    return reader
+
+
+def _extract_pdf_text(pdf_path, max_pages, page_indexes=None):
+    reader = _check_pdf_readable(pdf_path, max_pages)
+    target_indexes = page_indexes if page_indexes is not None else range(len(reader.pages))
+
+    pages = []
+    for idx in target_indexes:
+        try:
+            pages.append((reader.pages[idx].extract_text() or "").strip())
+        except (PyPdfError, ValueError, KeyError, OSError, RecursionError) as exc:
+            logger.warning("Text extraction failed on page %s: %s", idx + 1, exc)
+            raise PDFMergeError(f"Page {idx + 1} is corrupted and its text cannot be read.")
+
+    if not any(pages):
+        raise PDFMergeError(NO_TEXT_MESSAGE, status=422)
+    return pages
+
+
+# ======================================================================
 # TOOL 1: MERGE PDF
-# ==========================================
+# ======================================================================
 @csrf_exempt
 @require_POST
+@clerk_authenticated
 def merge_pdf(request):
-    """
-    POST /merge/
-    """
     uploads = request.FILES.getlist("files")
-
     if not uploads:
         return JsonResponse({"error": "No files uploaded. Use the 'files' field."}, status=400)
     if len(uploads) < 2:
@@ -143,7 +336,7 @@ def merge_pdf(request):
         saved_paths = []
         for index, upload in enumerate(uploads):
             path = os.path.join(work_dir, f"{index:03d}.pdf")
-            _save_upload(upload, path)
+            _save_pdf_upload(upload, path, MAX_FILE_SIZE)
             saved_paths.append((upload.name, path))
 
         writer = PdfWriter()
@@ -187,15 +380,13 @@ def merge_pdf(request):
             shutil.rmtree(work_dir, ignore_errors=True)
 
 
-# ==========================================
+# ======================================================================
 # TOOL 2: PDF TO JPG
-# ==========================================
+# ======================================================================
 @csrf_exempt
 @require_POST
+@clerk_authenticated
 def pdf_to_jpg(request):
-    """
-    POST /pdf-to-jpg/
-    """
     upload = request.FILES.get("file")
     if upload is None:
         return JsonResponse({"error": "No file uploaded. Use the 'file' field."}, status=400)
@@ -205,9 +396,70 @@ def pdf_to_jpg(request):
 
     try:
         dpi = _parse_dpi(request.POST.get("dpi"))
-
         pdf_path = os.path.join(work_dir, "input.pdf")
-        _validate_and_save_single_pdf(upload, pdf_path)
+        _save_pdf_upload(upload, pdf_path, JPG_MAX_FILE_SIZE)
+
+        base_name = get_valid_filename(Path(upload.name).stem) or "document"
+        raw_pages = (request.POST.get("pages") or "").strip()
+
+        try:
+            fitz = _import_fitz()
+            doc = fitz.open(pdf_path)
+            if doc.needs_pass:
+                doc.close()
+                raise PDFMergeError("The PDF is password protected. Unlock it first.")
+            page_count = doc.page_count
+            if page_count < 1:
+                doc.close()
+                raise PDFMergeError("The PDF contains no pages.")
+            if page_count > JPG_MAX_PAGES:
+                doc.close()
+                raise PDFMergeError(f"PDF has {page_count} pages; maximum is {JPG_MAX_PAGES}.", status=413)
+
+            target_indexes = (
+                _expand_page_ranges(_parse_page_ranges(raw_pages), page_count)
+                if raw_pages else list(range(page_count))
+            )
+
+            zoom = dpi / 72.0
+            mat = fitz.Matrix(zoom, zoom)
+
+            if len(target_indexes) == 1:
+                single_jpg = os.path.join(work_dir, "output.jpg")
+                pix = doc[target_indexes[0]].get_pixmap(matrix=mat, alpha=False)
+                pix.pil_save(single_jpg, format="JPEG", quality=JPG_QUALITY, optimize=True)
+                doc.close()
+                response = SelfCleaningFileResponse(
+                    open(single_jpg, "rb"),
+                    as_attachment=True,
+                    filename=f"{base_name}.jpg",
+                    content_type="image/jpeg",
+                    cleanup_dir=work_dir,
+                )
+                return response
+
+            zip_path = os.path.join(work_dir, "images.zip")
+            page_tmp = os.path.join(work_dir, "page.jpg")
+            with zipfile.ZipFile(zip_path, "w", compression=zipfile.ZIP_STORED) as zf:
+                for idx in target_indexes:
+                    pix = doc[idx].get_pixmap(matrix=mat, alpha=False)
+                    pix.pil_save(page_tmp, format="JPEG", quality=JPG_QUALITY, optimize=True)
+                    zf.write(page_tmp, arcname=f"{base_name}_page_{idx + 1:03d}.jpg")
+                    os.remove(page_tmp)
+            doc.close()
+
+            response = SelfCleaningFileResponse(
+                open(zip_path, "rb"),
+                as_attachment=True,
+                filename=f"{base_name}_images.zip",
+                content_type="application/zip",
+                cleanup_dir=work_dir,
+            )
+            return response
+        except PDFMergeError:
+            raise
+        except Exception:
+            pass
 
         try:
             info = pdfinfo_from_path(pdf_path, timeout=POPPLER_TIMEOUT)
@@ -225,24 +477,36 @@ def pdf_to_jpg(request):
         if page_count > JPG_MAX_PAGES:
             raise PDFMergeError(f"PDF has {page_count} pages; the maximum is {JPG_MAX_PAGES}.", status=413)
 
-        base_name = get_valid_filename(Path(upload.name).stem) or "document"
+        target_indexes = (
+            _expand_page_ranges(_parse_page_ranges(raw_pages), page_count)
+            if raw_pages else list(range(page_count))
+        )
+
+        if len(target_indexes) == 1:
+            page_no = target_indexes[0] + 1
+            images = convert_from_path(pdf_path, dpi=dpi, first_page=page_no, last_page=page_no, timeout=POPPLER_TIMEOUT)
+            single_jpg = os.path.join(work_dir, "output.jpg")
+            image = images[0].convert("RGB")
+            image.save(single_jpg, "JPEG", quality=JPG_QUALITY, optimize=True)
+            image.close()
+            response = SelfCleaningFileResponse(
+                open(single_jpg, "rb"),
+                as_attachment=True,
+                filename=f"{base_name}.jpg",
+                content_type="image/jpeg",
+                cleanup_dir=work_dir,
+            )
+            return response
+
         zip_path = os.path.join(work_dir, "images.zip")
         page_tmp = os.path.join(work_dir, "page.jpg")
 
         with zipfile.ZipFile(zip_path, "w", compression=zipfile.ZIP_STORED) as zf:
-            for page_no in range(1, page_count + 1):
-                try:
-                    images = convert_from_path(
-                        pdf_path, dpi=dpi, first_page=page_no, last_page=page_no, timeout=POPPLER_TIMEOUT,
-                    )
-                except PDFPopplerTimeoutError:
-                    raise PDFMergeError(f"Page {page_no} took too long to render.", status=408)
-                except (PDFPageCountError, PDFSyntaxError):
-                    raise PDFMergeError(f"Page {page_no} is corrupted and cannot be rendered.")
-
-                if not images:
-                    raise PDFMergeError(f"Page {page_no} could not be rendered.")
-
+            for idx in target_indexes:
+                page_no = idx + 1
+                images = convert_from_path(
+                    pdf_path, dpi=dpi, first_page=page_no, last_page=page_no, timeout=POPPLER_TIMEOUT,
+                )
                 image = images[0].convert("RGB")
                 try:
                     image.save(page_tmp, "JPEG", quality=JPG_QUALITY, optimize=True)
@@ -274,61 +538,15 @@ def pdf_to_jpg(request):
 
 
 # ======================================================================
-# Tools 3 & 4: Protect PDF / Compress PDF
+# TOOL 3: PROTECT PDF
 # ======================================================================
-import subprocess
-
-PROTECT_MAX_FILE_SIZE = getattr(settings, "PDF_PROTECT_MAX_FILE_SIZE", 50 * 1024 * 1024)
-PROTECT_MAX_PASSWORD_LEN = getattr(settings, "PDF_PROTECT_MAX_PASSWORD_LENGTH", 128)
-COMPRESS_MAX_FILE_SIZE = getattr(settings, "PDF_COMPRESS_MAX_FILE_SIZE", 100 * 1024 * 1024)
-COMPRESS_TIMEOUT = getattr(settings, "PDF_COMPRESS_TIMEOUT", 120)
-GS_BINARY = getattr(settings, "GHOSTSCRIPT_BINARY", "gs")
-
-# Whitelist of user-selectable compression levels -> Ghostscript presets.
-# Only these values ever reach the command line (no user-controlled arguments).
-COMPRESS_LEVELS = {
-    "low": "/printer",     # ~300 dpi, mild compression
-    "medium": "/ebook",    # ~150 dpi, good balance (default)
-    "high": "/screen",     # ~72 dpi, smallest file
-}
-
-
-def _save_pdf_upload(upload, dest_path, max_size):
-    """Validate a single PDF upload (extension, size, magic bytes) and save it in chunks."""
-    if not upload.name.lower().endswith(".pdf"):
-        raise PDFMergeError("Only .pdf files are accepted.", status=415)
-    if upload.size == 0:
-        raise PDFMergeError("The uploaded file is empty.")
-    if upload.size > max_size:
-        raise PDFMergeError(
-            f"File exceeds the {max_size // (1024 * 1024)} MB limit.", status=413
-        )
-
-    header = upload.read(5)
-    upload.seek(0)
-    if header != b"%PDF-":
-        raise PDFMergeError("The uploaded file is not a valid PDF.", status=415)
-
-    with open(dest_path, "wb") as out:
-        for chunk in upload.chunks():
-            out.write(chunk)
-
-
-# ----------------------------------------------------------------------
-# Tool 3: Protect PDF
-# ----------------------------------------------------------------------
 @csrf_exempt
 @require_POST
+@clerk_authenticated
 def protect_pdf(request):
-    """
-    POST /api/protect-pdf/
-    Form-data: file=<pdf>, password=<string>
-    Returns: AES-256 encrypted PDF as an attachment, or JSON {"error": "..."}.
-    """
     upload = request.FILES.get("file")
-    password = request.POST.get("password", "")   # never log or echo this value
+    password = request.POST.get("password", "")
 
-    # --- Input validation ---
     if upload is None:
         return JsonResponse({"error": "No file uploaded. Use the 'file' field."}, status=400)
     if not password:
@@ -339,25 +557,19 @@ def protect_pdf(request):
             status=400,
         )
 
-    work_dir = tempfile.mkdtemp(
-        prefix="protect_", dir=getattr(settings, "PDF_TEMP_DIR", None)
-    )
+    work_dir = tempfile.mkdtemp(prefix="protect_", dir=getattr(settings, "PDF_TEMP_DIR", None))
     response = None
 
     try:
-        # --- 1. Save upload under a generated name ---
         input_path = os.path.join(work_dir, "input.pdf")
         _save_pdf_upload(upload, input_path, PROTECT_MAX_FILE_SIZE)
 
-        # --- 2. Read and validate the PDF ---
         try:
             reader = PdfReader(input_path)
             if reader.is_encrypted:
                 raise PDFMergeError("This PDF is already password protected.")
             if len(reader.pages) == 0:
                 raise PDFMergeError("The PDF contains no pages.")
-
-            # clone_from copies pages, metadata and structure into the writer
             writer = PdfWriter(clone_from=reader)
         except PDFMergeError:
             raise
@@ -365,15 +577,13 @@ def protect_pdf(request):
             logger.warning("Unreadable PDF for protection: %s", exc)
             raise PDFMergeError("The PDF is corrupted or unreadable.")
 
-        # --- 3. Encrypt (AES-256) and write the output ---
         output_path = os.path.join(work_dir, "protected.pdf")
         try:
-            # owner password defaults to the user password when omitted
             writer.encrypt(user_password=password, algorithm="AES-256")
             with open(output_path, "wb") as out:
                 writer.write(out)
         except ImportError:
-            logger.error("'cryptography' package is missing; cannot use AES encryption.")
+            logger.error("'cryptography' package is missing.")
             raise PDFMergeError("Server encryption support is not configured.", status=500)
         except (PyPdfError, ValueError, OSError) as exc:
             logger.warning("Encryption failed: %s", exc)
@@ -381,7 +591,6 @@ def protect_pdf(request):
         finally:
             writer.close()
 
-        # --- 4. Serve + auto-delete the whole work_dir after the response ---
         base_name = get_valid_filename(Path(upload.name).stem) or "document"
         response = SelfCleaningFileResponse(
             open(output_path, "rb"),
@@ -402,20 +611,13 @@ def protect_pdf(request):
             shutil.rmtree(work_dir, ignore_errors=True)
 
 
-# ----------------------------------------------------------------------
-# Tool 4: Compress PDF (Ghostscript)
-# ----------------------------------------------------------------------
+# ======================================================================
+# TOOL 4: COMPRESS PDF
+# ======================================================================
 @csrf_exempt
 @require_POST
+@clerk_authenticated
 def compress_pdf(request):
-    """
-    POST /api/compress-pdf/
-    Form-data: file=<pdf>
-               level=<low|medium|high> (optional, default "medium")
-    Returns: compressed PDF as an attachment, or JSON {"error": "..."}.
-    If compression would make the file larger, the original is returned unchanged.
-    Response headers X-Original-Size / X-Compressed-Size report the byte sizes.
-    """
     upload = request.FILES.get("file")
     if upload is None:
         return JsonResponse({"error": "No file uploaded. Use the 'file' field."}, status=400)
@@ -426,19 +628,14 @@ def compress_pdf(request):
             {"error": f"'level' must be one of: {', '.join(COMPRESS_LEVELS)}."}, status=400
         )
 
-    work_dir = tempfile.mkdtemp(
-        prefix="compress_", dir=getattr(settings, "PDF_TEMP_DIR", None)
-    )
+    work_dir = tempfile.mkdtemp(prefix="compress_", dir=getattr(settings, "PDF_TEMP_DIR", None))
     response = None
 
     try:
-        # --- 1. Save upload under a generated name ---
         input_path = os.path.join(work_dir, "input.pdf")
         output_path = os.path.join(work_dir, "output.pdf")
         _save_pdf_upload(upload, input_path, COMPRESS_MAX_FILE_SIZE)
 
-        # Reject password-protected files early (Ghostscript can't open them).
-        # If pypdf can't parse the file we let Ghostscript try to repair it.
         try:
             if PdfReader(input_path).is_encrypted:
                 raise PDFMergeError("Password-protected PDFs cannot be compressed. Unlock it first.")
@@ -447,7 +644,6 @@ def compress_pdf(request):
         except Exception:
             pass
 
-        # --- 2. Run Ghostscript (argument list, no shell => no injection risk) ---
         cmd = [
             GS_BINARY,
             "-sDEVICE=pdfwrite",
@@ -456,7 +652,7 @@ def compress_pdf(request):
             "-dNOPAUSE",
             "-dBATCH",
             "-dQUIET",
-            "-dSAFER",                       # block file-system access from PDF/PostScript
+            "-dSAFER",
             f"-sOutputFile={output_path}",
             input_path,
         ]
@@ -467,33 +663,29 @@ def compress_pdf(request):
                 cwd=work_dir,
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,
-                timeout=COMPRESS_TIMEOUT,    # child is killed on timeout
+                timeout=COMPRESS_TIMEOUT,
                 check=False,
             )
+            gs_ok = result.returncode == 0 and os.path.exists(output_path) and os.path.getsize(output_path) > 0
         except FileNotFoundError:
-            logger.error("Ghostscript binary '%s' not found.", GS_BINARY)
-            raise PDFMergeError("Server is missing PDF compression tools.", status=500)
+            gs_ok = False
         except subprocess.TimeoutExpired:
             raise PDFMergeError("Compression timed out. Try a smaller file.", status=408)
 
-        if result.returncode != 0:
-            logger.warning(
-                "Ghostscript failed (code %s): %s",
-                result.returncode,
-                result.stderr.decode("utf-8", errors="replace")[:500],
-            )
-            raise PDFMergeError("The PDF is corrupted or could not be compressed.")
+        if not gs_ok:
+            try:
+                fitz = _import_fitz()
+                doc = fitz.open(input_path)
+                doc.save(output_path, garbage=4, deflate=True, clean=True)
+                doc.close()
+            except Exception:
+                raise PDFMergeError("The PDF is corrupted or could not be compressed.")
 
-        if not os.path.exists(output_path) or os.path.getsize(output_path) == 0:
-            raise PDFMergeError("Compression produced no output. The PDF may be corrupted.")
-
-        # --- 3. Never return a bigger file than we received ---
         original_size = os.path.getsize(input_path)
         compressed_size = os.path.getsize(output_path)
         served_path = output_path if compressed_size < original_size else input_path
         served_size = min(compressed_size, original_size)
 
-        # --- 4. Serve + auto-delete the whole work_dir after the response ---
         base_name = get_valid_filename(Path(upload.name).stem) or "document"
         response = SelfCleaningFileResponse(
             open(served_path, "rb"),
@@ -515,147 +707,34 @@ def compress_pdf(request):
         if response is None:
             shutil.rmtree(work_dir, ignore_errors=True)
 
+
 # ======================================================================
-# Batch 3: PDF to Text / PDF to Word / PDF to Speech
+# TOOL 5: PDF TO TEXT
 # ======================================================================
-
-TEXT_MAX_FILE_SIZE = getattr(settings, "PDF_TEXT_MAX_FILE_SIZE", 50 * 1024 * 1024)
-TEXT_MAX_PAGES = getattr(settings, "PDF_TEXT_MAX_PAGES", 500)
-WORD_MAX_FILE_SIZE = getattr(settings, "PDF_WORD_MAX_FILE_SIZE", 30 * 1024 * 1024)
-WORD_MAX_PAGES = getattr(settings, "PDF_WORD_MAX_PAGES", 100)
-SPEECH_MAX_FILE_SIZE = getattr(settings, "PDF_SPEECH_MAX_FILE_SIZE", 20 * 1024 * 1024)
-SPEECH_MAX_CHARS = getattr(settings, "PDF_SPEECH_MAX_CHARS", 20000)
-SPEECH_TIMEOUT = getattr(settings, "PDF_SPEECH_TIMEOUT", 30)
-
-NO_TEXT_MESSAGE = (
-    "No extractable text found. The PDF is probably scanned images and needs OCR first."
-)
-
-
-# ----------------------------------------------------------------------
-# Shared helpers
-# ----------------------------------------------------------------------
-def _run_single_pdf_tool(request, *, prefix, max_size, processor):
-    """
-    Common pipeline for single-file tools:
-      validate 'file' -> save to private temp dir -> processor() -> SelfCleaningFileResponse.
-
-    processor(request, input_path, work_dir) must return
-    (output_path, file_extension, content_type) or raise PDFMergeError.
-    The whole work_dir is deleted after the response closes, or immediately on error.
-    """
-    upload = request.FILES.get("file")
-    if upload is None:
-        return JsonResponse({"error": "No file uploaded. Use the 'file' field."}, status=400)
-
-    work_dir = tempfile.mkdtemp(prefix=prefix, dir=getattr(settings, "PDF_TEMP_DIR", None))
-    response = None
-
-    try:
-        input_path = os.path.join(work_dir, "input.pdf")   # generated name, never user input
-        _save_pdf_upload(upload, input_path, max_size)
-
-        output_path, extension, content_type = processor(request, input_path, work_dir)
-
-        if not os.path.exists(output_path) or os.path.getsize(output_path) == 0:
-            raise PDFMergeError("Conversion produced no output. The PDF may be corrupted.")
-
-        base_name = get_valid_filename(Path(upload.name).stem) or "document"
-        response = SelfCleaningFileResponse(
-            open(output_path, "rb"),
-            as_attachment=True,
-            filename=f"{base_name}{extension}",
-            content_type=content_type,
-            cleanup_dir=work_dir,
-        )
-        return response
-
-    except PDFMergeError as exc:
-        return JsonResponse({"error": exc.message}, status=exc.status)
-    except Exception:
-        logger.exception("Unexpected error in %s tool", prefix.rstrip("_"))
-        return JsonResponse({"error": "Internal error while processing the PDF."}, status=500)
-    finally:
-        if response is None:
-            shutil.rmtree(work_dir, ignore_errors=True)
-
-
-def _check_pdf_readable(pdf_path, max_pages):
-    """Open with pypdf: reject encrypted, empty, oversized or corrupted PDFs. Returns the reader."""
-    try:
-        reader = PdfReader(pdf_path)
-        if reader.is_encrypted:
-            raise PDFMergeError("The PDF is password protected. Unlock it first.")
-        page_count = len(reader.pages)
-    except PDFMergeError:
-        raise
-    except (PyPdfError, ValueError, KeyError, OSError, RecursionError) as exc:
-        logger.warning("Unreadable PDF: %s", exc)
-        raise PDFMergeError("The PDF is corrupted or unreadable.")
-
-    if page_count == 0:
-        raise PDFMergeError("The PDF contains no pages.")
-    if page_count > max_pages:
-        raise PDFMergeError(
-            f"PDF has {page_count} pages; the maximum is {max_pages}.", status=413
-        )
-    return reader
-
-
-def _extract_pdf_text(pdf_path, max_pages):
-    """
-    Extract text from every page with pypdf.
-    Returns a list of page strings. Raises PDFMergeError (422) if no page has text
-    (typical for scanned PDFs), or 400 if a page is corrupted.
-    """
-    reader = _check_pdf_readable(pdf_path, max_pages)
-
-    pages = []
-    for page_no, page in enumerate(reader.pages, start=1):
-        try:
-            pages.append((page.extract_text() or "").strip())
-        except (PyPdfError, ValueError, KeyError, OSError, RecursionError) as exc:
-            logger.warning("Text extraction failed on page %s: %s", page_no, exc)
-            raise PDFMergeError(f"Page {page_no} is corrupted and its text cannot be read.")
-
-    if not any(pages):
-        raise PDFMergeError(NO_TEXT_MESSAGE, status=422)
-    return pages
-
-
-# ----------------------------------------------------------------------
-# Tool 5: PDF to Text
-# ----------------------------------------------------------------------
 def _process_pdf_to_text(request, input_path, work_dir):
     pages = _extract_pdf_text(input_path, TEXT_MAX_PAGES)
-
     output_path = os.path.join(work_dir, "output.txt")
     with open(output_path, "w", encoding="utf-8") as out:
-        out.write("\n\n".join(pages))   # blank line between pages
+        out.write("\n\n".join(pages))
     return output_path, ".txt", "text/plain; charset=utf-8"
 
 
 @csrf_exempt
 @require_POST
+@clerk_authenticated
 def pdf_to_text(request):
-    """
-    POST /api/pdf-to-text/
-    Form-data: file=<pdf>
-    Returns: UTF-8 .txt attachment, or JSON {"error": "..."}.
-    """
     return _run_single_pdf_tool(
         request, prefix="pdf2txt_", max_size=TEXT_MAX_FILE_SIZE, processor=_process_pdf_to_text
     )
 
 
-# ----------------------------------------------------------------------
-# Tool 6: PDF to Word (pdf2docx)
-# ----------------------------------------------------------------------
+# ======================================================================
+# TOOL 6: PDF TO WORD (pdf2docx)
+# ======================================================================
 def _process_pdf_to_word(request, input_path, work_dir):
-    _check_pdf_readable(input_path, WORD_MAX_PAGES)   # encrypted / corrupt / too many pages
-
+    _check_pdf_readable(input_path, WORD_MAX_PAGES)
     try:
-        from pdf2docx import Converter    # lazy import: heavy (PyMuPDF, OpenCV)
+        from pdf2docx import Converter
     except ImportError:
         logger.error("pdf2docx is not installed.")
         raise PDFMergeError("Server is missing PDF to Word conversion tools.", status=500)
@@ -664,8 +743,8 @@ def _process_pdf_to_word(request, input_path, work_dir):
     converter = None
     try:
         converter = Converter(input_path)
-        converter.convert(output_path, start=0, end=None)   # single process, all pages
-    except Exception as exc:   # pdf2docx/PyMuPDF raise many different exception types
+        converter.convert(output_path, start=0, end=None)
+    except Exception as exc:
         logger.warning("pdf2docx conversion failed: %s", exc)
         raise PDFMergeError("The PDF could not be converted. It may be corrupted.")
     finally:
@@ -684,51 +763,47 @@ def _process_pdf_to_word(request, input_path, work_dir):
 
 @csrf_exempt
 @require_POST
+@clerk_authenticated
 def pdf_to_word(request):
-    """
-    POST /api/pdf-to-word/
-    Form-data: file=<pdf>
-    Returns: .docx attachment, or JSON {"error": "..."}.
-    """
     return _run_single_pdf_tool(
         request, prefix="pdf2word_", max_size=WORD_MAX_FILE_SIZE, processor=_process_pdf_to_word
     )
 
 
-# ----------------------------------------------------------------------
-# Tool 7: PDF to Speech (pypdf + gTTS)
-# ----------------------------------------------------------------------
+# ======================================================================
+# TOOL 7: PDF TO SPEECH
+# ======================================================================
 def _process_pdf_to_speech(request, input_path, work_dir):
     try:
-        from gtts import gTTS                 # lazy import
+        from gtts import gTTS
         from gtts.lang import tts_langs
         from gtts.tts import gTTSError
     except ImportError:
         logger.error("gTTS is not installed.")
         raise PDFMergeError("Server is missing text-to-speech tools.", status=500)
 
-    # Validate the optional 'lang' field against gTTS's supported languages
     lang = request.POST.get("lang", "en").strip().lower()
     if lang not in tts_langs():
         raise PDFMergeError(f"Unsupported language '{lang}'.")
 
-    pages = _extract_pdf_text(input_path, TEXT_MAX_PAGES)
+    raw_pages = (request.POST.get("pages") or "").strip()
+    reader = _check_pdf_readable(input_path, TEXT_MAX_PAGES)
+    target_indexes = (
+        _expand_page_ranges(_parse_page_ranges(raw_pages), len(reader.pages))
+        if raw_pages else range(len(reader.pages))
+    )
 
-    # Collapse whitespace/newlines so speech flows naturally
+    pages = _extract_pdf_text(input_path, TEXT_MAX_PAGES, page_indexes=target_indexes)
     text = " ".join(" ".join(pages).split())
     if not text:
         raise PDFMergeError(NO_TEXT_MESSAGE, status=422)
     if len(text) > SPEECH_MAX_CHARS:
-        raise PDFMergeError(
-            f"The PDF contains {len(text)} characters; the limit for audio is {SPEECH_MAX_CHARS}.",
-            status=413,
-        )
+        text = text[:SPEECH_MAX_CHARS]
 
     output_path = os.path.join(work_dir, "output.mp3")
     try:
         gTTS(text=text, lang=lang, timeout=SPEECH_TIMEOUT).save(output_path)
     except AssertionError:
-        # gTTS raises AssertionError("No text to speak") when nothing is speakable
         raise PDFMergeError(NO_TEXT_MESSAGE, status=422)
     except gTTSError as exc:
         logger.warning("gTTS request failed: %s", exc)
@@ -742,99 +817,18 @@ def _process_pdf_to_speech(request, input_path, work_dir):
 
 @csrf_exempt
 @require_POST
+@clerk_authenticated
 def pdf_to_speech(request):
-    """
-    POST /api/pdf-to-speech/
-    Form-data: file=<pdf>
-               lang=<gTTS language code> (optional, default "en")
-    Returns: .mp3 attachment, or JSON {"error": "..."}.
-    """
     return _run_single_pdf_tool(
         request, prefix="pdf2speech_", max_size=SPEECH_MAX_FILE_SIZE, processor=_process_pdf_to_speech
     )
 
+
 # ======================================================================
-# Batch 4: Split PDF (extract pages) / Unlock PDF
+# TOOL 8: SPLIT PDF
 # ======================================================================
-import re
-
-from pypdf.errors import DependencyError
-
-SPLIT_MAX_FILE_SIZE = getattr(settings, "PDF_SPLIT_MAX_FILE_SIZE", 100 * 1024 * 1024)
-SPLIT_MAX_PAGES = getattr(settings, "PDF_SPLIT_MAX_PAGES", 2000)
-SPLIT_MAX_RANGES = getattr(settings, "PDF_SPLIT_MAX_RANGES", 200)
-SPLIT_MAX_PAGES_STRING = getattr(settings, "PDF_SPLIT_MAX_PAGES_STRING", 1000)
-UNLOCK_MAX_FILE_SIZE = getattr(settings, "PDF_UNLOCK_MAX_FILE_SIZE", 100 * 1024 * 1024)
-UNLOCK_MAX_PASSWORD_LEN = getattr(settings, "PDF_UNLOCK_MAX_PASSWORD_LENGTH", 128)
-
-# Matches "5" or "5-7" (digit count capped so huge numbers are rejected cheaply)
-_PAGE_TOKEN_RE = re.compile(r"^(\d{1,6})(?:-(\d{1,6}))?$")
-
-
-# ----------------------------------------------------------------------
-# Page-range helpers
-# ----------------------------------------------------------------------
-def _parse_page_ranges(raw):
-    """
-    Parse a string like "1,3,5-7" into [(1, 1), (3, 3), (5, 7)].
-    Validates syntax only; bounds are checked once the page count is known.
-    Raises PDFMergeError (400) on invalid input.
-    """
-    raw = (raw or "").strip()
-    if not raw:
-        raise PDFMergeError("'pages' is required, for example: 1,3,5-7.")
-    if len(raw) > SPLIT_MAX_PAGES_STRING:
-        raise PDFMergeError("'pages' value is too long.")
-
-    tokens = raw.replace(" ", "").split(",")
-    if len(tokens) > SPLIT_MAX_RANGES:
-        raise PDFMergeError(f"Too many page ranges; the maximum is {SPLIT_MAX_RANGES}.")
-
-    ranges = []
-    for token in tokens:
-        match = _PAGE_TOKEN_RE.match(token)
-        if not match:
-            raise PDFMergeError(
-                f"Invalid page selection '{token}'. Use numbers and ranges like 1,3,5-7."
-            )
-        start = int(match.group(1))
-        end = int(match.group(2)) if match.group(2) else start
-        if start < 1 or end < 1:
-            raise PDFMergeError("Page numbers start at 1.")
-        if end < start:
-            raise PDFMergeError(f"Invalid range '{token}': the start must not exceed the end.")
-        ranges.append((start, end))
-    return ranges
-
-
-def _expand_page_ranges(ranges, total_pages):
-    """
-    Validate ranges against the PDF length and expand them into unique,
-    zero-based page indexes, keeping the order the user typed.
-    Bounds are checked BEFORE expanding, so a range like 1-999999 can never
-    allocate a huge list.
-    """
-    indexes, seen = [], set()
-    for start, end in ranges:
-        if end > total_pages:
-            bad = end if start <= total_pages else start
-            raise PDFMergeError(
-                f"Page {bad} is out of range; the PDF has {total_pages} page(s)."
-            )
-        for page_no in range(start, end + 1):
-            if page_no not in seen:
-                seen.add(page_no)
-                indexes.append(page_no - 1)
-    return indexes
-
-
-# ----------------------------------------------------------------------
-# Tool 8: Split PDF / Extract Pages
-# ----------------------------------------------------------------------
 def _process_split_pdf(request, input_path, work_dir):
-    ranges = _parse_page_ranges(request.POST.get("pages"))   # fail fast on bad syntax
-
-    # Rejects encrypted, corrupted, empty and oversized PDFs
+    ranges = _parse_page_ranges(request.POST.get("pages"))
     reader = _check_pdf_readable(input_path, SPLIT_MAX_PAGES)
     indexes = _expand_page_ranges(ranges, len(reader.pages))
 
@@ -856,54 +850,41 @@ def _process_split_pdf(request, input_path, work_dir):
 
 @csrf_exempt
 @require_POST
+@clerk_authenticated
 def split_pdf(request):
-    """
-    POST /api/split-pdf/
-    Form-data: file=<pdf>, pages="1,3,5-7" (1-indexed; order kept, duplicates removed)
-    Returns: new PDF containing only the selected pages, or JSON {"error": "..."}.
-    """
     return _run_single_pdf_tool(
         request, prefix="split_", max_size=SPLIT_MAX_FILE_SIZE, processor=_process_split_pdf
     )
 
 
-# ----------------------------------------------------------------------
-# Tool 9: Unlock PDF
-# ----------------------------------------------------------------------
+# ======================================================================
+# TOOL 9: UNLOCK PDF
+# ======================================================================
 def _process_unlock_pdf(request, input_path, work_dir):
-    # The field must be present; an empty value is allowed because some PDFs
-    # only have an owner password (restrictions) and open with an empty user password.
-    password = request.POST.get("password")   # never log or echo this value
+    password = request.POST.get("password")
     if password is None:
         raise PDFMergeError("A 'password' field is required.")
     if len(password) > UNLOCK_MAX_PASSWORD_LEN:
-        raise PDFMergeError(
-            f"Password must be at most {UNLOCK_MAX_PASSWORD_LEN} characters."
-        )
+        raise PDFMergeError(f"Password must be at most {UNLOCK_MAX_PASSWORD_LEN} characters.")
 
-    # --- Open the file and confirm it is actually encrypted ---
     try:
         reader = PdfReader(input_path)
         if not reader.is_encrypted:
             raise PDFMergeError("This PDF is not password protected.")
-
-        # decrypt() returns PasswordType (0 = NOT_DECRYPTED, 1 = user, 2 = owner)
         if not reader.decrypt(password):
             raise PDFMergeError("Incorrect password.")
-
         if len(reader.pages) == 0:
             raise PDFMergeError("The PDF contains no pages.")
-        writer = PdfWriter(clone_from=reader)   # decrypted copy, no encryption applied
+        writer = PdfWriter(clone_from=reader)
     except PDFMergeError:
         raise
     except DependencyError:
-        logger.error("'cryptography' package is missing; cannot decrypt AES PDFs.")
+        logger.error("'cryptography' package is missing.")
         raise PDFMergeError("Server decryption support is not configured.", status=500)
     except (PyPdfError, NotImplementedError, ValueError, KeyError, OSError, RecursionError) as exc:
-        logger.warning("Unreadable or unsupported encrypted PDF: %s", exc)
+        logger.warning("Unreadable encrypted PDF: %s", exc)
         raise PDFMergeError("The PDF is corrupted or uses an unsupported encryption method.")
 
-    # --- Write the unencrypted copy ---
     output_path = os.path.join(work_dir, "output.pdf")
     try:
         with open(output_path, "wb") as out:
@@ -919,87 +900,59 @@ def _process_unlock_pdf(request, input_path, work_dir):
 
 @csrf_exempt
 @require_POST
+@clerk_authenticated
 def unlock_pdf(request):
-    """
-    POST /api/unlock-pdf/
-    Form-data: file=<encrypted pdf>, password=<string>
-    Returns: decrypted PDF, or 400 JSON {"error": "..."} for a wrong password
-    or a PDF that was never encrypted.
-    """
     return _run_single_pdf_tool(
         request, prefix="unlock_", max_size=UNLOCK_MAX_FILE_SIZE, processor=_process_unlock_pdf
     )
 
 
-
 # ======================================================================
-# Batch 5: PDF to Excel / Excel to PDF / Image to PDF / Crop PDF
+# Non-PDF Upload Helpers
 # ======================================================================
-import math
-from xml.sax.saxutils import escape as _xml_escape
-
-from pypdf.generic import RectangleObject
-
-EXCEL_MAX_FILE_SIZE = getattr(settings, "PDF_EXCEL_MAX_FILE_SIZE", 50 * 1024 * 1024)
-EXCEL_MAX_PAGES = getattr(settings, "PDF_EXCEL_MAX_PAGES", 200)
-EXCEL_MAX_CELLS = getattr(settings, "PDF_EXCEL_MAX_CELLS", 200_000)
-XLSX_MAX_FILE_SIZE = getattr(settings, "EXCEL_PDF_MAX_FILE_SIZE", 20 * 1024 * 1024)
-XLSX_MAX_SHEETS = getattr(settings, "EXCEL_PDF_MAX_SHEETS", 20)
-XLSX_MAX_CELLS = getattr(settings, "EXCEL_PDF_MAX_CELLS", 50_000)
-XLSX_MAX_CELL_CHARS = getattr(settings, "EXCEL_PDF_MAX_CELL_CHARS", 60)
-PDF_FONT_PATH = getattr(settings, "PDF_FONT_PATH", None)
-IMAGE_MAX_FILE_SIZE = getattr(settings, "IMAGE_PDF_MAX_FILE_SIZE", 30 * 1024 * 1024)
-IMAGE_MAX_PIXELS = getattr(settings, "IMAGE_PDF_MAX_PIXELS", 50_000_000)
-CROP_MAX_FILE_SIZE = getattr(settings, "PDF_CROP_MAX_FILE_SIZE", 100 * 1024 * 1024)
-CROP_MAX_PAGES = getattr(settings, "PDF_CROP_MAX_PAGES", 2000)
-
-XLSX_EXTENSIONS = {".xlsx", ".xlsm"}
-IMAGE_EXTENSIONS = {".jpg", ".jpeg", ".png", ".webp", ".bmp", ".gif", ".tif", ".tiff"}
-EXCEL_MIME = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-
-
-# ----------------------------------------------------------------------
-# Shared helper for NON-PDF inputs (mirrors _run_single_pdf_tool)
-# ----------------------------------------------------------------------
 def _is_zip_header(header):
-    """.xlsx files are ZIP containers."""
     return header.startswith(b"PK\x03\x04")
+
+
+def _is_office_header(header):
+    # Supports both ZIP-based Office (.pptx/.docx/.xlsx) and legacy OLE2 (.ppt/.doc/.xls)
+    return header.startswith(b"PK\x03\x04") or header.startswith(b"\xd0\xcf\x11\xe0")
 
 
 def _is_image_header(header):
     return (
-        header.startswith(b"\xff\xd8\xff")                          # JPEG
-        or header.startswith(b"\x89PNG\r\n\x1a\n")                  # PNG
-        or header.startswith(b"GIF8")                               # GIF
-        or header.startswith(b"BM")                                 # BMP
-        or header.startswith(b"II*\x00") or header.startswith(b"MM\x00*")   # TIFF
-        or (header[:4] == b"RIFF" and header[8:12] == b"WEBP")      # WebP
+        header.startswith(b"\xff\xd8\xff")
+        or header.startswith(b"\x89PNG\r\n\x1a\n")
+        or header.startswith(b"GIF8")
+        or header.startswith(b"BM")
+        or header.startswith(b"II*\x00") or header.startswith(b"MM\x00*")
+        or (header[:4] == b"RIFF" and header[8:12] == b"WEBP")
     )
 
 
-def _save_typed_upload(upload, work_dir, *, max_size, allowed_exts, magic_check, label):
-    """
-    Validate a single non-PDF upload (extension allowlist, size, magic bytes) and save it
-    under a generated name that keeps only the validated extension. Returns the saved path.
-    """
+def _is_text_header(header):
+    return b"\x00" not in header
+
+
+def _save_typed_upload(upload, work_dir, *, max_size, allowed_exts, magic_check, label, index=0):
     ext = Path(upload.name).suffix.lower()
     if ext not in allowed_exts:
         raise PDFMergeError(
             f"Only {label} files are accepted ({', '.join(sorted(allowed_exts))}).", status=415
         )
     if upload.size == 0:
-        raise PDFMergeError("The uploaded file is empty.")
+        raise PDFMergeError(f"'{upload.name}' is empty.")
     if upload.size > max_size:
         raise PDFMergeError(
-            f"File exceeds the {max_size // (1024 * 1024)} MB limit.", status=413
+            f"'{upload.name}' exceeds the {max_size // (1024 * 1024)} MB limit.", status=413
         )
 
-    header = upload.read(12)
+    header = upload.read(512)
     upload.seek(0)
     if not magic_check(header):
-        raise PDFMergeError(f"The uploaded file is not a valid {label} file.", status=415)
+        raise PDFMergeError(f"'{upload.name}' is not a valid {label} file.", status=415)
 
-    dest_path = os.path.join(work_dir, f"input{ext}")   # ext is from our allowlist, never raw user input
+    dest_path = os.path.join(work_dir, f"input_{index:03d}{ext}")
     with open(dest_path, "wb") as out:
         for chunk in upload.chunks():
             out.write(chunk)
@@ -1007,10 +960,6 @@ def _save_typed_upload(upload, work_dir, *, max_size, allowed_exts, magic_check,
 
 
 def _run_single_file_tool(request, *, prefix, max_size, allowed_exts, magic_check, label, processor):
-    """
-    Same pipeline as _run_single_pdf_tool, for tools whose INPUT is not a PDF.
-    processor(request, input_path, work_dir) -> (output_path, extension, content_type).
-    """
     upload = request.FILES.get("file")
     if upload is None:
         return JsonResponse({"error": "No file uploaded. Use the 'file' field."}, status=400)
@@ -1049,14 +998,13 @@ def _run_single_file_tool(request, *, prefix, max_size, allowed_exts, magic_chec
             shutil.rmtree(work_dir, ignore_errors=True)
 
 
-# ----------------------------------------------------------------------
-# Tool 10: PDF to Excel (pdfplumber + openpyxl)
-# ----------------------------------------------------------------------
+# ======================================================================
+# TOOL 10: PDF TO EXCEL
+# ======================================================================
 _NUMERIC_RE = re.compile(r"^-?\d+(\.\d+)?$")
 
 
 def _excel_cell(value, illegal_re):
-    """Normalise a pdfplumber cell for openpyxl: strip illegal chars, cast clean numbers."""
     if value is None:
         return None
     text = illegal_re.sub("", str(value)).strip()
@@ -1067,14 +1015,13 @@ def _excel_cell(value, illegal_re):
             return int(text) if "." not in text else float(text)
         except ValueError:
             pass
-    return text[:32767]   # Excel's per-cell character limit
+    return text[:32767]
 
 
 def _process_pdf_to_excel(request, input_path, work_dir):
-    _check_pdf_readable(input_path, EXCEL_MAX_PAGES)   # encrypted / corrupt / too many pages
-
+    _check_pdf_readable(input_path, EXCEL_MAX_PAGES)
     try:
-        import pdfplumber                                    # lazy import
+        import pdfplumber
         from openpyxl import Workbook
         from openpyxl.cell.cell import ILLEGAL_CHARACTERS_RE
     except ImportError:
@@ -1082,7 +1029,7 @@ def _process_pdf_to_excel(request, input_path, work_dir):
         raise PDFMergeError("Server is missing PDF to Excel conversion tools.", status=500)
 
     workbook = Workbook()
-    workbook.remove(workbook.active)   # start with no sheets
+    workbook.remove(workbook.active)
     cell_count = 0
 
     try:
@@ -1105,7 +1052,6 @@ def _process_pdf_to_excel(request, input_path, work_dir):
                             )
                     wrote_table = True
 
-                # No tables on this page: fall back to text, one line per row
                 if not wrote_table:
                     text = (page.extract_text() or "").strip()
                     if text:
@@ -1117,7 +1063,7 @@ def _process_pdf_to_excel(request, input_path, work_dir):
                                 cell_count += 1
     except PDFMergeError:
         raise
-    except Exception as exc:   # pdfplumber/pdfminer raise many exception types
+    except Exception as exc:
         logger.warning("pdfplumber failed: %s", exc)
         raise PDFMergeError("The PDF is corrupted or its content cannot be read.")
 
@@ -1125,49 +1071,38 @@ def _process_pdf_to_excel(request, input_path, work_dir):
         raise PDFMergeError(NO_TEXT_MESSAGE, status=422)
 
     output_path = os.path.join(work_dir, "output.xlsx")
-    try:
-        workbook.save(output_path)
-    except (OSError, ValueError) as exc:
-        logger.warning("Writing xlsx failed: %s", exc)
-        raise PDFMergeError("Failed to write the Excel file.", status=500)
-
+    workbook.save(output_path)
     return output_path, ".xlsx", EXCEL_MIME
 
 
 @csrf_exempt
 @require_POST
+@clerk_authenticated
 def pdf_to_excel(request):
-    """
-    POST /pdf-to-excel/
-    Form-data: file=<pdf>
-    Returns: .xlsx with one sheet per detected table (text fallback per page), or JSON error.
-    """
     return _run_single_pdf_tool(
         request, prefix="pdf2xlsx_", max_size=EXCEL_MAX_FILE_SIZE, processor=_process_pdf_to_excel
     )
 
 
-# ----------------------------------------------------------------------
-# Tool 11: Excel to PDF (openpyxl + reportlab, pure Python)
-# ----------------------------------------------------------------------
+# ======================================================================
+# TOOL 11: EXCEL TO PDF & CSV TO PDF
+# ======================================================================
 def _xlsx_cell_text(value):
-    """Render an openpyxl cell value as a short display string."""
     if value is None:
         return ""
-    if hasattr(value, "isoformat"):            # date / datetime / time
+    if hasattr(value, "isoformat"):
         text = value.isoformat(sep=" ") if hasattr(value, "hour") else value.isoformat()
     elif isinstance(value, float) and value.is_integer():
         text = str(int(value))
     else:
         text = str(value)
-    text = " ".join(text.split())              # collapse newlines/whitespace
+    text = " ".join(text.split())
     if len(text) > XLSX_MAX_CELL_CHARS:
         text = text[: XLSX_MAX_CELL_CHARS - 1] + "…"
     return text
 
 
 def _register_pdf_font():
-    """Use a TTF from settings.PDF_FONT_PATH if present (Unicode), else Helvetica."""
     if PDF_FONT_PATH and os.path.exists(PDF_FONT_PATH):
         try:
             from reportlab.pdfbase import pdfmetrics
@@ -1180,70 +1115,15 @@ def _register_pdf_font():
     return "Helvetica", "Helvetica-Bold"
 
 
-def _process_excel_to_pdf(request, input_path, work_dir):
-    try:
-        from openpyxl import load_workbook                  # lazy imports
-        from openpyxl.utils.exceptions import InvalidFileException
-        from reportlab.lib import colors
-        from reportlab.lib.pagesizes import A4, landscape
-        from reportlab.lib.styles import getSampleStyleSheet
-        from reportlab.lib.units import mm
-        from reportlab.platypus import (
-            PageBreak, Paragraph, SimpleDocTemplate, Spacer, Table, TableStyle,
-        )
-    except ImportError:
-        logger.error("openpyxl/reportlab not installed.")
-        raise PDFMergeError("Server is missing Excel to PDF conversion tools.", status=500)
+def _render_sheets_to_pdf(sheets, output_path, doc_title="Spreadsheet"):
+    from reportlab.lib import colors
+    from reportlab.lib.pagesizes import A4, landscape
+    from reportlab.lib.styles import getSampleStyleSheet
+    from reportlab.lib.units import mm
+    from reportlab.platypus import (
+        PageBreak, Paragraph, SimpleDocTemplate, Spacer, Table, TableStyle,
+    )
 
-    # --- Read the workbook (cached formula values, streaming mode) ---
-    try:
-        workbook = load_workbook(input_path, read_only=True, data_only=True)
-    except (InvalidFileException, zipfile.BadZipFile, KeyError, ValueError, OSError) as exc:
-        logger.warning("Unreadable xlsx: %s", exc)
-        raise PDFMergeError("The Excel file is corrupted or unreadable.")
-    except Exception as exc:
-        logger.warning("Unexpected xlsx load failure: %s", exc)
-        raise PDFMergeError("The Excel file is corrupted or unreadable.")
-
-    if len(workbook.sheetnames) > XLSX_MAX_SHEETS:
-        raise PDFMergeError(
-            f"Workbook has {len(workbook.sheetnames)} sheets; the maximum is {XLSX_MAX_SHEETS}.",
-            status=413,
-        )
-
-    sheets = []          # [(title, rows)]
-    total_cells = 0
-    try:
-        for sheet in workbook.worksheets:
-            rows, used_cols = [], 0
-            for raw_row in sheet.iter_rows(values_only=True):
-                row = [_xlsx_cell_text(v) for v in raw_row]
-                last = max((i + 1 for i, v in enumerate(row) if v), default=0)
-                rows.append(row)
-                used_cols = max(used_cols, last)
-                total_cells += len(row)
-                if total_cells > XLSX_MAX_CELLS:
-                    raise PDFMergeError(
-                        f"Workbook has more than {XLSX_MAX_CELLS} cells; split it first.", status=413
-                    )
-            # Trim trailing empty rows and columns
-            while rows and not any(rows[-1]):
-                rows.pop()
-            rows = [(r + [""] * used_cols)[:used_cols] for r in rows]
-            if rows and used_cols:
-                sheets.append((sheet.title, rows))
-    except PDFMergeError:
-        raise
-    except Exception as exc:
-        logger.warning("Reading xlsx rows failed: %s", exc)
-        raise PDFMergeError("The Excel file is corrupted or unreadable.")
-    finally:
-        workbook.close()
-
-    if not sheets:
-        raise PDFMergeError("The spreadsheet contains no data.", status=422)
-
-    # --- Render with reportlab ---
     font, font_bold = _register_pdf_font()
     page_size = landscape(A4)
     margin = 12 * mm
@@ -1255,7 +1135,6 @@ def _process_excel_to_pdf(request, input_path, work_dir):
     story = []
     for sheet_no, (title, rows) in enumerate(sheets):
         cols = len(rows[0])
-        # Column widths from content length (capped), scaled to fit the page width
         font_size = 8
         widths = [
             max(6, min(40, max(len(r[c]) for r in rows))) * font_size * 0.55 + 8
@@ -1276,39 +1155,81 @@ def _process_excel_to_pdf(request, input_path, work_dir):
             ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#EFEFEF")),
             ("GRID", (0, 0), (-1, -1), 0.25, colors.HexColor("#BBBBBB")),
             ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
-            ("TOPPADDING", (0, 0), (-1, -1), 2),
-            ("BOTTOMPADDING", (0, 0), (-1, -1), 2),
+            ("TOPPADDING", (0, 0), (-1, -1), 2.5),
+            ("BOTTOMPADDING", (0, 0), (-1, -1), 2.5),
         ]))
 
         if sheet_no:
             story.append(PageBreak())
-        story.append(Paragraph(_xml_escape(title), title_style))
-        story.append(Spacer(1, 4 * mm))
+        if title:
+            story.append(Paragraph(_xml_escape(title), title_style))
+            story.append(Spacer(1, 4 * mm))
         story.append(table)
 
-    output_path = os.path.join(work_dir, "output.pdf")
     try:
         doc = SimpleDocTemplate(
             output_path, pagesize=page_size,
             leftMargin=margin, rightMargin=margin, topMargin=margin, bottomMargin=margin,
-            title=Path(input_path).stem, author="SnapPDF",
+            title=doc_title, author="SnapPDF",
         )
         doc.build(story)
-    except Exception as exc:   # reportlab LayoutError and friends
+    except Exception as exc:
         logger.warning("reportlab build failed: %s", exc)
-        raise PDFMergeError("The spreadsheet could not be laid out as a PDF.", status=500)
+        raise PDFMergeError("The table data could not be laid out as a PDF.", status=500)
 
+
+def _process_excel_to_pdf(request, input_path, work_dir):
+    try:
+        from openpyxl import load_workbook
+        from openpyxl.utils.exceptions import InvalidFileException
+    except ImportError:
+        raise PDFMergeError("Server is missing Excel to PDF conversion tools.", status=500)
+
+    try:
+        workbook = load_workbook(input_path, read_only=True, data_only=True)
+    except (InvalidFileException, zipfile.BadZipFile, KeyError, ValueError, OSError):
+        raise PDFMergeError("The Excel file is corrupted or unreadable.")
+
+    if len(workbook.sheetnames) > XLSX_MAX_SHEETS:
+        raise PDFMergeError(
+            f"Workbook has {len(workbook.sheetnames)} sheets; the maximum is {XLSX_MAX_SHEETS}.",
+            status=413,
+        )
+
+    sheets, total_cells = [], 0
+    try:
+        for sheet in workbook.worksheets:
+            rows, used_cols = [], 0
+            for raw_row in sheet.iter_rows(values_only=True):
+                row = [_xlsx_cell_text(v) for v in raw_row]
+                last = max((i + 1 for i, v in enumerate(row) if v), default=0)
+                rows.append(row)
+                used_cols = max(used_cols, last)
+                total_cells += len(row)
+                if total_cells > XLSX_MAX_CELLS:
+                    raise PDFMergeError(
+                        f"Workbook has more than {XLSX_MAX_CELLS} cells; split it first.", status=413
+                    )
+            while rows and not any(rows[-1]):
+                rows.pop()
+            rows = [(r + [""] * used_cols)[:used_cols] for r in rows]
+            if rows and used_cols:
+                sheets.append((sheet.title, rows))
+    finally:
+        workbook.close()
+
+    if not sheets:
+        raise PDFMergeError("The spreadsheet contains no data.", status=422)
+
+    output_path = os.path.join(work_dir, "output.pdf")
+    _render_sheets_to_pdf(sheets, output_path, doc_title=Path(input_path).stem)
     return output_path, ".pdf", "application/pdf"
 
 
 @csrf_exempt
 @require_POST
+@clerk_authenticated
 def excel_to_pdf(request):
-    """
-    POST /excel-to-pdf/
-    Form-data: file=<.xlsx or .xlsm>
-    Returns: landscape PDF with one section per sheet, or JSON error.
-    """
     return _run_single_file_tool(
         request, prefix="xlsx2pdf_", max_size=XLSX_MAX_FILE_SIZE,
         allowed_exts=XLSX_EXTENSIONS, magic_check=_is_zip_header, label="Excel",
@@ -1316,94 +1237,402 @@ def excel_to_pdf(request):
     )
 
 
-# ----------------------------------------------------------------------
-# Tool 12: Image to PDF (Pillow)
-# ----------------------------------------------------------------------
-def _process_image_to_pdf(request, input_path, work_dir):
-    try:
-        from PIL import Image, ImageOps, UnidentifiedImageError   # lazy import
-    except ImportError:
-        logger.error("Pillow not installed.")
-        raise PDFMergeError("Server is missing image conversion tools.", status=500)
+# ======================================================================
+# TOOL: CSV TO PDF
+# ======================================================================
+def _process_csv_to_pdf(request, input_path, work_dir):
+    with open(input_path, "rb") as raw_f:
+        raw_bytes = raw_f.read()
 
+    for encoding in ("utf-8-sig", "utf-8", "cp1252", "latin-1"):
+        try:
+            text = raw_bytes.decode(encoding)
+            break
+        except UnicodeDecodeError:
+            continue
+    else:
+        raise PDFMergeError("Could not decode the CSV file text encoding.")
+
+    sample = text[:4096]
+    try:
+        dialect = csv.Sniffer().sniff(sample, delimiters=",;\t|")
+    except csv.Error:
+        dialect = csv.excel
+
+    reader = csv.reader(io.StringIO(text), dialect)
+    rows, used_cols, total_cells = [], 0, 0
+    for raw_row in reader:
+        row = [_xlsx_cell_text(v) for v in raw_row]
+        if not any(row):
+            continue
+        last = max((i + 1 for i, v in enumerate(row) if v), default=0)
+        rows.append(row)
+        used_cols = max(used_cols, last)
+        total_cells += len(row)
+        if total_cells > XLSX_MAX_CELLS:
+            raise PDFMergeError(f"CSV exceeds {XLSX_MAX_CELLS} cells limit.", status=413)
+
+    if not rows or used_cols == 0:
+        raise PDFMergeError("The CSV file contains no data.", status=422)
+
+    rows = [(r + [""] * used_cols)[:used_cols] for r in rows]
     output_path = os.path.join(work_dir, "output.pdf")
-    try:
-        with Image.open(input_path) as img:
-            # Image.open is lazy: size is known before any pixel data is decoded
-            width, height = img.size
-            if width * height > IMAGE_MAX_PIXELS:
-                raise PDFMergeError(
-                    f"Image is {width}x{height}px; the maximum is {IMAGE_MAX_PIXELS:,} pixels.",
-                    status=413,
-                )
-
-            # Physical size in the PDF follows the embedded DPI (defaults to 72)
-            dpi_info = img.info.get("dpi") or (72, 72)
-            try:
-                dpi = float(dpi_info[0])
-                if not 1 <= dpi <= 1200:
-                    dpi = 72.0
-            except (TypeError, ValueError, IndexError):
-                dpi = 72.0
-
-            try:
-                img = ImageOps.exif_transpose(img) or img   # honour phone camera rotation
-            except Exception:
-                pass
-
-            has_alpha = img.mode in ("RGBA", "LA", "PA") or (
-                img.mode == "P" and "transparency" in img.info
-            )
-            if has_alpha:
-                rgba = img.convert("RGBA")                  # flatten transparency onto white
-                flat = Image.new("RGB", rgba.size, (255, 255, 255))
-                flat.paste(rgba, mask=rgba.getchannel("A"))
-                out = flat
-            elif img.mode in ("RGB", "L", "CMYK"):
-                out = img.copy()                            # PDF-safe modes as-is
-            else:
-                out = img.convert("RGB")                    # 1, P, I, F, YCbCr, ...
-
-            out.save(output_path, "PDF", resolution=dpi)
-            out.close()
-    except PDFMergeError:
-        raise
-    except Image.DecompressionBombError:
-        raise PDFMergeError("The image is too large to process safely.", status=413)
-    except (UnidentifiedImageError, OSError, ValueError, SyntaxError) as exc:
-        logger.warning("Image conversion failed: %s", exc)
-        raise PDFMergeError("The image is corrupted or in an unsupported format.")
-
+    _render_sheets_to_pdf([("CSV Table", rows)], output_path, doc_title="CSV Export")
     return output_path, ".pdf", "application/pdf"
 
 
 @csrf_exempt
 @require_POST
-def image_to_pdf(request):
-    """
-    POST /image-to-pdf/
-    Form-data: file=<jpg|png|webp|bmp|gif|tiff>
-    Returns: single-page PDF, or JSON error.
-    """
+@clerk_authenticated
+def csv_to_pdf(request):
     return _run_single_file_tool(
-        request, prefix="img2pdf_", max_size=IMAGE_MAX_FILE_SIZE,
-        allowed_exts=IMAGE_EXTENSIONS, magic_check=_is_image_header, label="image",
-        processor=_process_image_to_pdf,
+        request, prefix="csv2pdf_", max_size=CSV_MAX_FILE_SIZE,
+        allowed_exts=CSV_EXTENSIONS, magic_check=_is_text_header, label="CSV",
+        processor=_process_csv_to_pdf,
     )
 
 
-# ----------------------------------------------------------------------
-# Tool 13: Crop PDF (pypdf)
-# ----------------------------------------------------------------------
+# ======================================================================
+# TOOL: WORD (.DOCX) TO PDF
+# ======================================================================
+def _process_word_to_pdf(request, input_path, work_dir):
+    output_path = os.path.join(work_dir, "output.pdf")
+
+    for binary in ("libreoffice", "soffice"):
+        if shutil.which(binary):
+            try:
+                subprocess.run(
+                    [binary, "--headless", "--convert-to", "pdf", "--outdir", work_dir, input_path],
+                    cwd=work_dir, stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=90, check=False,
+                )
+                generated = os.path.join(work_dir, Path(input_path).stem + ".pdf")
+                if os.path.exists(generated) and os.path.getsize(generated) > 0:
+                    os.replace(generated, output_path)
+                    return output_path, ".pdf", "application/pdf"
+            except Exception as exc:
+                logger.warning("LibreOffice conversion failed, falling back to python-docx: %s", exc)
+
+    try:
+        import docx
+        from reportlab.lib import colors
+        from reportlab.lib.pagesizes import A4
+        from reportlab.lib.styles import ParagraphStyle, getSampleStyleSheet
+        from reportlab.lib.units import mm
+        from reportlab.platypus import Paragraph, SimpleDocTemplate, Spacer, Table, TableStyle
+    except ImportError:
+        raise PDFMergeError("Server is missing Word (.docx) conversion libraries.", status=500)
+
+    try:
+        document = docx.Document(input_path)
+    except Exception:
+        raise PDFMergeError("The Word (.docx) file is corrupted or unreadable.")
+
+    font, font_bold = _register_pdf_font()
+    styles = getSampleStyleSheet()
+    normal_style = ParagraphStyle(
+        "DocNormal", parent=styles["Normal"], fontName=font, fontSize=11, leading=15, spaceAfter=6
+    )
+    h1_style = ParagraphStyle(
+        "DocH1", parent=styles["Heading1"], fontName=font_bold, fontSize=18, leading=22, spaceAfter=10
+    )
+    h2_style = ParagraphStyle(
+        "DocH2", parent=styles["Heading2"], fontName=font_bold, fontSize=14, leading=18, spaceAfter=8
+    )
+
+    story = []
+    for para in document.paragraphs:
+        text = para.text.strip()
+        if not text:
+            story.append(Spacer(1, 3 * mm))
+            continue
+        style_name = (para.style.name or "").lower() if para.style else ""
+        escaped = _xml_escape(text)
+        if "heading 1" in style_name or "title" in style_name:
+            story.append(Paragraph(escaped, h1_style))
+        elif "heading" in style_name:
+            story.append(Paragraph(escaped, h2_style))
+        else:
+            story.append(Paragraph(escaped, normal_style))
+
+    for tbl in document.tables:
+        t_rows = []
+        for row in tbl.rows:
+            t_rows.append([_xlsx_cell_text(cell.text) for cell in row.cells])
+        if t_rows:
+            rl_table = Table(t_rows, repeatRows=1)
+            rl_table.setStyle(TableStyle([
+                ("FONTNAME", (0, 0), (-1, -1), font),
+                ("FONTSIZE", (0, 0), (-1, -1), 9),
+                ("GRID", (0, 0), (-1, -1), 0.5, colors.HexColor("#CCCCCC")),
+                ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#F3F4F6")),
+                ("PADDING", (0, 0), (-1, -1), 4),
+            ]))
+            story.append(Spacer(1, 3 * mm))
+            story.append(rl_table)
+            story.append(Spacer(1, 4 * mm))
+
+    if not story:
+        raise PDFMergeError("The Word document contains no readable text or tables.", status=422)
+
+    doc = SimpleDocTemplate(
+        output_path, pagesize=A4,
+        leftMargin=18 * mm, rightMargin=18 * mm, topMargin=18 * mm, bottomMargin=18 * mm,
+    )
+    doc.build(story)
+    return output_path, ".pdf", "application/pdf"
+
+
+@csrf_exempt
+@require_POST
+@clerk_authenticated
+def word_to_pdf(request):
+    return _run_single_file_tool(
+        request, prefix="docx2pdf_", max_size=DOCX_MAX_FILE_SIZE,
+        allowed_exts=DOCX_EXTENSIONS, magic_check=_is_zip_header, label="Word (.docx)",
+        processor=_process_word_to_pdf,
+    )
+
+
+# ======================================================================
+# TOOL: HTML TO PDF
+# ======================================================================
+class _SimpleHTMLParser(HTMLParser):
+    def __init__(self):
+        super().__init__()
+        self.blocks = []
+        self._curr_tag = "p"
+        self._buf = []
+        self._skip = False
+
+    def handle_starttag(self, tag, attrs):
+        tag = tag.lower()
+        if tag in ("script", "style", "head", "noscript"):
+            self._skip = True
+        elif tag in ("h1", "h2", "h3", "p", "li", "div", "tr", "br"):
+            self._flush()
+            self._curr_tag = tag
+
+    def handle_endtag(self, tag):
+        tag = tag.lower()
+        if tag in ("script", "style", "head", "noscript"):
+            self._skip = False
+        elif tag in ("h1", "h2", "h3", "p", "li", "div", "tr"):
+            self._flush()
+            self._curr_tag = "p"
+
+    def handle_data(self, data):
+        if not self._skip:
+            self._buf.append(data)
+
+    def _flush(self):
+        text = " ".join("".join(self._buf).split()).strip()
+        self._buf.clear()
+        if text:
+            self.blocks.append((self._curr_tag, text))
+
+
+def _render_html_string_to_pdf(html_content, output_path):
+    from reportlab.lib.pagesizes import A4
+    from reportlab.lib.styles import ParagraphStyle, getSampleStyleSheet
+    from reportlab.lib.units import mm
+    from reportlab.platypus import Paragraph, SimpleDocTemplate
+
+    parser = _SimpleHTMLParser()
+    parser.feed(html_content)
+    parser._flush()
+
+    if not parser.blocks:
+        raise PDFMergeError("No readable text content found in the HTML.", status=422)
+
+    font, font_bold = _register_pdf_font()
+    styles = getSampleStyleSheet()
+    body_style = ParagraphStyle("HTMLBody", parent=styles["Normal"], fontName=font, fontSize=10.5, leading=15, spaceAfter=6)
+    h1_style = ParagraphStyle("HTMLH1", parent=styles["Heading1"], fontName=font_bold, fontSize=18, leading=22, spaceAfter=10)
+    h2_style = ParagraphStyle("HTMLH2", parent=styles["Heading2"], fontName=font_bold, fontSize=14, leading=18, spaceAfter=8)
+    li_style = ParagraphStyle("HTMLLi", parent=body_style, leftIndent=14, spaceAfter=4)
+
+    story = []
+    for tag, text in parser.blocks:
+        esc = _xml_escape(text)
+        if tag == "h1":
+            story.append(Paragraph(esc, h1_style))
+        elif tag in ("h2", "h3"):
+            story.append(Paragraph(esc, h2_style))
+        elif tag == "li":
+            story.append(Paragraph(f"• {esc}", li_style))
+        else:
+            story.append(Paragraph(esc, body_style))
+
+    doc = SimpleDocTemplate(
+        output_path, pagesize=A4,
+        leftMargin=18 * mm, rightMargin=18 * mm, topMargin=18 * mm, bottomMargin=18 * mm,
+    )
+    doc.build(story)
+
+
+@csrf_exempt
+@require_POST
+@clerk_authenticated
+def html_to_pdf(request):
+    upload = request.FILES.get("file")
+    raw_html = (request.POST.get("html_code") or "").strip()
+
+    if upload is None and not raw_html:
+        return JsonResponse({"error": "Upload an .html file or paste HTML code."}, status=400)
+
+    work_dir = tempfile.mkdtemp(prefix="html2pdf_", dir=getattr(settings, "PDF_TEMP_DIR", None))
+    response = None
+
+    try:
+        if upload is not None:
+            input_path = _save_typed_upload(
+                upload, work_dir, max_size=HTML_MAX_FILE_SIZE,
+                allowed_exts=HTML_EXTENSIONS, magic_check=_is_text_header, label="HTML",
+            )
+            with open(input_path, "rb") as f:
+                html_str = f.read().decode("utf-8", errors="replace")
+            base_name = get_valid_filename(Path(upload.name).stem) or "webpage"
+        else:
+            html_str = raw_html
+            base_name = "webpage"
+
+        output_path = os.path.join(work_dir, "output.pdf")
+        _render_html_string_to_pdf(html_str, output_path)
+
+        response = SelfCleaningFileResponse(
+            open(output_path, "rb"),
+            as_attachment=True,
+            filename=f"{base_name}.pdf",
+            content_type="application/pdf",
+            cleanup_dir=work_dir,
+        )
+        return response
+    except PDFMergeError as exc:
+        return JsonResponse({"error": exc.message}, status=exc.status)
+    except Exception:
+        logger.exception("Unexpected error in HTML to PDF")
+        return JsonResponse({"error": "Internal error while converting HTML to PDF."}, status=500)
+    finally:
+        if response is None:
+            shutil.rmtree(work_dir, ignore_errors=True)
+
+
+# ======================================================================
+# TOOL 12: MULTI-IMAGE / JPG TO PDF
+# ======================================================================
+@csrf_exempt
+@require_POST
+@clerk_authenticated
+def image_to_pdf(request):
+    uploads = request.FILES.getlist("files") or request.FILES.getlist("file")
+    if not uploads:
+        return JsonResponse({"error": "No images uploaded."}, status=400)
+    if len(uploads) > IMAGE_MAX_FILES:
+        return JsonResponse({"error": f"Maximum {IMAGE_MAX_FILES} images allowed at once."}, status=400)
+
+    page_size_opt = (request.POST.get("page_size") or "fit").strip().lower()
+    orientation_opt = (request.POST.get("orientation") or "auto").strip().lower()
+    margin_opt = (request.POST.get("margin") or "none").strip().lower()
+
+    margin_pts = {"none": 0, "small": 24, "big": 54}.get(margin_opt, 0)
+
+    work_dir = tempfile.mkdtemp(prefix="img2pdf_", dir=getattr(settings, "PDF_TEMP_DIR", None))
+    response = None
+
+    try:
+        from PIL import Image, ImageOps
+    except ImportError:
+        shutil.rmtree(work_dir, ignore_errors=True)
+        return JsonResponse({"error": "Server is missing image conversion tools."}, status=500)
+
+    try:
+        saved_paths = []
+        for idx, upload in enumerate(uploads):
+            p = _save_typed_upload(
+                upload, work_dir, max_size=IMAGE_MAX_FILE_SIZE,
+                allowed_exts=IMAGE_EXTENSIONS, magic_check=_is_image_header, label="image", index=idx,
+            )
+            saved_paths.append(p)
+
+        processed_pages = []
+        for p in saved_paths:
+            with Image.open(p) as img:
+                w, h = img.size
+                if w * h > IMAGE_MAX_PIXELS:
+                    raise PDFMergeError(f"Image is {w}x{h}px; maximum is {IMAGE_MAX_PIXELS:,} pixels.", status=413)
+                try:
+                    img = ImageOps.exif_transpose(img) or img
+                except Exception:
+                    pass
+
+                has_alpha = img.mode in ("RGBA", "LA", "PA") or (img.mode == "P" and "transparency" in img.info)
+                if has_alpha:
+                    rgba = img.convert("RGBA")
+                    flat = Image.new("RGB", rgba.size, (255, 255, 255))
+                    flat.paste(rgba, mask=rgba.getchannel("A"))
+                    rgb_img = flat
+                elif img.mode == "RGB":
+                    rgb_img = img.copy()
+                else:
+                    rgb_img = img.convert("RGB")
+
+                if page_size_opt == "a4":
+                    a4_w, a4_h = 1240, 1754
+                    if orientation_opt == "landscape" or (orientation_opt == "auto" and rgb_img.width > rgb_img.height):
+                        a4_w, a4_h = a4_h, a4_w
+                    pad = int(margin_pts * (150.0 / 72.0))
+                    avail_w = max(100, a4_w - 2 * pad)
+                    avail_h = max(100, a4_h - 2 * pad)
+                    rgb_img.thumbnail((avail_w, avail_h), Image.Resampling.LANCZOS)
+                    canvas = Image.new("RGB", (a4_w, a4_h), (255, 255, 255))
+                    canvas.paste(rgb_img, ((a4_w - rgb_img.width) // 2, (a4_h - rgb_img.height) // 2))
+                    rgb_img.close()
+                    processed_pages.append(canvas)
+                else:
+                    if margin_pts > 0:
+                        pad = int(margin_pts * 2)
+                        canvas = Image.new("RGB", (rgb_img.width + 2 * pad, rgb_img.height + 2 * pad), (255, 255, 255))
+                        canvas.paste(rgb_img, (pad, pad))
+                        rgb_img.close()
+                        processed_pages.append(canvas)
+                    else:
+                        processed_pages.append(rgb_img)
+
+        output_path = os.path.join(work_dir, "output.pdf")
+        first, rest = processed_pages[0], processed_pages[1:]
+        first.save(output_path, "PDF", resolution=150.0, save_all=True, append_images=rest)
+        for im in processed_pages:
+            im.close()
+
+        base_name = get_valid_filename(Path(uploads[0].name).stem) or "images"
+        suffix = "_merged.pdf" if len(uploads) > 1 else ".pdf"
+        response = SelfCleaningFileResponse(
+            open(output_path, "rb"),
+            as_attachment=True,
+            filename=f"{base_name}{suffix}",
+            content_type="application/pdf",
+            cleanup_dir=work_dir,
+        )
+        return response
+
+    except PDFMergeError as exc:
+        return JsonResponse({"error": exc.message}, status=exc.status)
+    except Exception:
+        logger.exception("Unexpected error in image_to_pdf")
+        return JsonResponse({"error": "Internal error while converting images to PDF."}, status=500)
+    finally:
+        if response is None:
+            shutil.rmtree(work_dir, ignore_errors=True)
+
+
+# ======================================================================
+# TOOL 13: CROP PDF
+# ======================================================================
 _CROP_SIDES = ("left", "top", "right", "bottom")
 _CROP_UNITS = {"pt": 1.0, "mm": 72 / 25.4, "cm": 72 / 2.54, "in": 72.0}
 
 
 def _parse_crop_margins(post):
-    """
-    Read left/top/right/bottom margins (amount to REMOVE from each edge) plus an optional
-    'unit' (pt, mm, cm, in; default pt). Returns margins in PDF points.
-    """
     unit = (post.get("unit") or "pt").strip().lower()
     if unit not in _CROP_UNITS:
         raise PDFMergeError(f"'unit' must be one of: {', '.join(_CROP_UNITS)}.")
@@ -1426,15 +1655,11 @@ def _parse_crop_margins(post):
         margins[side] = value * factor
 
     if not any(margins.values()):
-        raise PDFMergeError("At least one crop margin must be greater than zero.")
+        raise PDFMergeError("Drag the crop box or set at least one margin greater than zero.")
     return margins
 
 
 def _margins_for_rotation(m, rotation):
-    """
-    Map margins given in the VIEWER's orientation onto the page's stored (unrotated)
-    coordinates. Returns (left, bottom, right, top) to remove in page space.
-    """
     l, t, r, b = m["left"], m["top"], m["right"], m["bottom"]
     if rotation == 90:
         return t, l, b, r
@@ -1446,12 +1671,11 @@ def _margins_for_rotation(m, rotation):
 
 
 def _process_crop_pdf(request, input_path, work_dir):
-    margins = _parse_crop_margins(request.POST)                    # fail fast on bad input
-
-    raw_pages = (request.POST.get("pages") or "").strip()          # optional: "1,3,5-7"
+    margins = _parse_crop_margins(request.POST)
+    raw_pages = (request.POST.get("pages") or "").strip()
     ranges = _parse_page_ranges(raw_pages) if raw_pages else None
 
-    reader = _check_pdf_readable(input_path, CROP_MAX_PAGES)       # encrypted / corrupt / too big
+    reader = _check_pdf_readable(input_path, CROP_MAX_PAGES)
     total_pages = len(reader.pages)
     indexes = _expand_page_ranges(ranges, total_pages) if ranges else range(total_pages)
 
@@ -1471,7 +1695,7 @@ def _process_crop_pdf(request, input_path, work_dir):
                 rotation = 0
 
             ml, mb, mr, mt = _margins_for_rotation(margins, rotation)
-            box = page.cropbox                                     # the area viewers display
+            box = page.cropbox
             left = float(box.left) + ml
             bottom = float(box.bottom) + mb
             right = float(box.right) - mr
@@ -1508,39 +1732,30 @@ def _process_crop_pdf(request, input_path, work_dir):
 
 @csrf_exempt
 @require_POST
+@clerk_authenticated
 def crop_pdf(request):
-    """
-    POST /crop-pdf/
-    Form-data: file=<pdf>
-               left, top, right, bottom = amount to remove from each edge (required)
-               unit  = pt | mm | cm | in   (optional, default pt)
-               pages = "1,3,5-7"           (optional, default all pages)
-    Returns: cropped PDF, or JSON error.
-    """
     return _run_single_pdf_tool(
         request, prefix="crop_", max_size=CROP_MAX_FILE_SIZE, processor=_process_crop_pdf
     )
 
-# ======================================================================
-# Tool 14: Edit PDF (text boxes + whiteout from the visual editor)
-# ======================================================================
-import json
 
-EDIT_MAX_FILE_SIZE = getattr(settings, "PDF_EDIT_MAX_FILE_SIZE", 100 * 1024 * 1024)
-EDIT_MAX_PAGES = getattr(settings, "PDF_EDIT_MAX_PAGES", 1000)
+# ======================================================================
+# TOOL 14: EDIT PDF (With Sans / Serif / Mono & Bold / Italic Auto-Match)
+# ======================================================================
+EDIT_MAX_FILE_SIZE = getattr(settings, "PDF_EDIT_MAX_FILE_SIZE", 150 * 1024 * 1024)
+EDIT_MAX_PAGES = getattr(settings, "PDF_EDIT_MAX_PAGES", 2000)
 EDIT_MAX_ELEMENTS = getattr(settings, "PDF_EDIT_MAX_ELEMENTS", 500)
 EDIT_MAX_TEXT_CHARS = getattr(settings, "PDF_EDIT_MAX_TEXT_CHARS", 5000)
-EDIT_MAX_JSON_BYTES = getattr(settings, "PDF_EDIT_MAX_JSON_BYTES", 2 * 1024 * 1024)
+EDIT_MAX_JSON_BYTES = getattr(settings, "PDF_EDIT_MAX_JSON_BYTES", 5 * 1024 * 1024)
 EDIT_FONT_PATH = getattr(settings, "PDF_FONT_PATH", None)
 EDIT_MIN_FONT_SIZE, EDIT_MAX_FONT_SIZE = 4.0, 200.0
-EDIT_LINE_HEIGHT = 1.2            # MUST match the editor's CSS line-height for .txt
+EDIT_LINE_HEIGHT = 1.2
 
 _HEX_COLOR_RE = re.compile(r"^#?([0-9a-fA-F]{6})$")
 _CONTROL_CHARS_RE = re.compile(r"[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]")
 
 
 def _import_fitz():
-    """PyMuPDF is importable as 'pymupdf' (new) or 'fitz' (legacy)."""
     try:
         import pymupdf as fitz
         return fitz
@@ -1554,7 +1769,6 @@ def _import_fitz():
 
 
 def _edit_font():
-    """(fontname, fontfile) for PyMuPDF: Unicode TTF from settings if present, else Helvetica."""
     if EDIT_FONT_PATH and os.path.exists(EDIT_FONT_PATH):
         return "SnapPDFSans", EDIT_FONT_PATH
     return "helv", None
@@ -1587,17 +1801,6 @@ def _edit_number(obj, key, label, *, minimum=None, maximum=None, required=True):
 
 
 def _parse_edit_payload(raw):
-    """
-    Validate the editor's JSON:
-      {"version": 1, "redact": false,
-       "elements": [
-         {"page": 1, "type": "whiteout", "x": 72, "y": 90, "w": 200, "h": 30,
-          "pageWidth": 612, "pageHeight": 792},
-         {"page": 1, "type": "text", "x": 72, "y": 140, "w": 200, "h": 17,
-          "text": "Hello", "fontSize": 14, "color": "#000000", ...}]}
-    Coordinates are PDF points in the DISPLAYED page space, origin top-left, y down.
-    Returns (elements, redact).
-    """
     if not raw or not raw.strip():
         raise PDFMergeError("'edits' JSON is required.")
     if len(raw) > EDIT_MAX_JSON_BYTES:
@@ -1653,18 +1856,23 @@ def _parse_edit_payload(raw):
             align = str(el.get("align", "left")).lower()
             if align not in ("left", "center", "right"):
                 raise PDFMergeError(f"{label}: 'align' must be left, center or right.")
+
+            font_family = str(el.get("fontFamily", "sans")).lower()
+            if font_family not in ("sans", "serif", "mono"):
+                font_family = "sans"
+
             item.update(
                 text=text,
                 font_size=font_size if font_size is not None else 14.0,
+                font_family=font_family,
                 color=_hex_to_rgb(el.get("color", "#000000"), label),
                 bold=bool(el.get("bold", False)),
+                italic=bool(el.get("italic", False)),
                 align=align,
             )
-        else:  # whiteout
+        else:
             if item["w"] <= 0 or item["h"] <= 0:
-                raise PDFMergeError(
-                    f"{label}: a whiteout box needs a positive width and height."
-                )
+                raise PDFMergeError(f"{label}: a whiteout box needs a positive width and height.")
             item["fill"] = _hex_to_rgb(el.get("fill", "#ffffff"), label)
 
         elements.append(item)
@@ -1672,16 +1880,7 @@ def _parse_edit_payload(raw):
     return elements, bool(data.get("redact", False))
 
 
-# ----------------------------------------------------------------------
-# Geometry: editor coordinates -> PyMuPDF rectangles
-# ----------------------------------------------------------------------
 def _element_rect(fitz, el, page_rect, label):
-    """
-    Convert an element's editor coordinates (PDF points, DISPLAYED page, origin top-left,
-    y down) into a fitz.Rect on the displayed page. pdf.js viewports and page.rect share
-    this convention, so this is normally a 1:1 copy. If the client measured a different
-    page size (pageWidth/pageHeight), rescale proportionally. Finally clip to the page.
-    """
     sx = page_rect.width / el["page_w"] if el["page_w"] else 1.0
     sy = page_rect.height / el["page_h"] if el["page_h"] else 1.0
     box = fitz.Rect(
@@ -1697,16 +1896,13 @@ def _element_rect(fitz, el, page_rect, label):
 
 
 def _draw_whiteout(fitz, page, box, fill):
-    """Paint an opaque rectangle over existing content (content underneath is hidden, not removed)."""
     shape = page.new_shape()
-    # Drawing happens in the page's UNROTATED space: derotate the displayed-space box.
     shape.draw_rect(box * page.derotation_matrix)
     shape.finish(color=None, fill=fill, width=0)
-    shape.commit()   # overlay=True by default: drawn on top of the page content
+    shape.commit()
 
 
 def _redact_boxes(fitz, page, boxes):
-    """True redaction: physically remove text/images under each box, then fill it."""
     derot = page.derotation_matrix
     for box, fill in boxes:
         page.add_redact_annot(box * derot, fill=fill)
@@ -1714,7 +1910,6 @@ def _redact_boxes(fitz, page, boxes):
 
 
 def _textbox(page, rect, text, font_size, kwargs):
-    """insert_textbox with the editor's line height; older PyMuPDF lacks 'lineheight'."""
     try:
         return page.insert_textbox(
             rect, text, fontsize=font_size, lineheight=EDIT_LINE_HEIGHT, **kwargs
@@ -1723,12 +1918,23 @@ def _textbox(page, rect, text, font_size, kwargs):
         return page.insert_textbox(rect, text, fontsize=font_size, **kwargs)
 
 
+_PYMUPDF_FONTS = {
+    ("sans", False, False): "helv",
+    ("sans", True, False): "hebo",
+    ("sans", False, True): "heit",
+    ("sans", True, True): "hebi",
+    ("serif", False, False): "tiro",
+    ("serif", True, False): "tibo",
+    ("serif", False, True): "tiit",
+    ("serif", True, True): "tibi",
+    ("mono", False, False): "cour",
+    ("mono", True, False): "cobo",
+    ("mono", False, True): "coit",
+    ("mono", True, True): "cobi",
+}
+
+
 def _insert_text(fitz, page, box, el, fontname, fontfile, label):
-    """
-    Write a text box at 'box' (displayed-page coordinates). If the text does not fit
-    (browser and PDF font metrics differ slightly), first grow the box downward within
-    the page, then shrink the font, so the user's text is never silently dropped.
-    """
     align = {
         "left": fitz.TEXT_ALIGN_LEFT,
         "center": fitz.TEXT_ALIGN_CENTER,
@@ -1740,14 +1946,14 @@ def _insert_text(fitz, page, box, el, fontname, fontfile, label):
         fontfile=fontfile,
         color=el["color"],
         align=align,
-        rotate=page.rotation,   # keeps text upright on /Rotate 90/180/270 pages
+        rotate=page.rotation,
     )
-    if el["bold"]:
-        if fontfile is None:
-            kwargs["fontname"] = "hebo"          # Helvetica-Bold
-        else:
-            kwargs["render_mode"] = 2            # fill + stroke = synthetic bold for TTF
-            kwargs["border_width"] = max(0.2, el["font_size"] * 0.025)
+    if fontfile is None:
+        key = (el.get("font_family", "sans"), bool(el.get("bold")), bool(el.get("italic")))
+        kwargs["fontname"] = _PYMUPDF_FONTS.get(key, "helv")
+    elif el["bold"]:
+        kwargs["render_mode"] = 2
+        kwargs["border_width"] = max(0.2, el["font_size"] * 0.025)
 
     page_rect = page.rect
     derot = page.derotation_matrix
@@ -1756,13 +1962,12 @@ def _insert_text(fitz, page, box, el, fontname, fontfile, label):
     for _ in range(12):
         rc = _textbox(page, box * derot, el["text"], font_size, kwargs)
         if rc >= 0:
-            return                                # written successfully
-        # rc < 0 is the missing height: try growing the box downward inside the page
+            return
         grown = fitz.Rect(box.x0, box.y0, box.x1, min(page_rect.y1, box.y1 - rc + 1))
         if grown.height > box.height + 0.5:
             box = grown
             continue
-        font_size *= 0.9                          # cannot grow: shrink the font
+        font_size *= 0.9
         if font_size < EDIT_MIN_FONT_SIZE:
             break
 
@@ -1772,12 +1977,9 @@ def _insert_text(fitz, page, box, el, fontname, fontfile, label):
     )
 
 
-# ----------------------------------------------------------------------
-# Processor
-# ----------------------------------------------------------------------
 def _process_edit_pdf(request, input_path, work_dir):
-    elements, redact = _parse_edit_payload(request.POST.get("edits"))   # fail fast on bad JSON
-    _check_pdf_readable(input_path, EDIT_MAX_PAGES)                      # encrypted / corrupt / too big
+    elements, redact = _parse_edit_payload(request.POST.get("edits"))
+    _check_pdf_readable(input_path, EDIT_MAX_PAGES)
 
     fitz = _import_fitz()
     fontname, fontfile = _edit_font()
@@ -1793,7 +1995,6 @@ def _process_edit_pdf(request, input_path, work_dir):
             raise PDFMergeError("The PDF is password protected. Unlock it first.")
         page_count = doc.page_count
 
-        # Group elements by page and validate page numbers against the real document
         by_page = {}
         for index, el in enumerate(elements, start=1):
             if el["page"] > page_count:
@@ -1806,11 +2007,10 @@ def _process_edit_pdf(request, input_path, work_dir):
 
         for page_no, items in sorted(by_page.items()):
             page = doc[page_no - 1]
-            page_rect = page.rect   # displayed page, rotation applied, origin (0, 0) top-left
+            page_rect = page.rect
             whiteouts = [e for e in items if e["type"] == "whiteout"]
             texts = [e for e in items if e["type"] == "text"]
 
-            # 1. Whiteouts first, so text placed over them stays visible (matches editor z-order)
             if whiteouts:
                 boxes = [
                     (_element_rect(fitz, e, page_rect, e["label"]), e["fill"]) for e in whiteouts
@@ -1821,7 +2021,6 @@ def _process_edit_pdf(request, input_path, work_dir):
                     for box, fill in boxes:
                         _draw_whiteout(fitz, page, box, fill)
 
-            # 2. Text boxes
             for e in texts:
                 box = _element_rect(fitz, e, page_rect, e["label"])
                 _insert_text(fitz, page, box, e, fontname, fontfile, e["label"])
@@ -1831,7 +2030,7 @@ def _process_edit_pdf(request, input_path, work_dir):
 
     except PDFMergeError:
         raise
-    except Exception as exc:   # MuPDF raises RuntimeError/ValueError for damaged structures
+    except Exception as exc:
         logger.warning("Edit PDF failed: %s", exc)
         raise PDFMergeError("The PDF could not be edited. It may be corrupted.")
     finally:
@@ -1840,21 +2039,661 @@ def _process_edit_pdf(request, input_path, work_dir):
     return output_path, "_edited.pdf", "application/pdf"
 
 
-# ----------------------------------------------------------------------
-# View
-# ----------------------------------------------------------------------
 @csrf_exempt
 @require_POST
+@clerk_authenticated
 def edit_pdf(request):
-    """
-    POST /api/edit-pdf/
-    Form-data: file=<pdf>
-               edits=<JSON string, see _parse_edit_payload>
-    Returns: edited PDF as an attachment, or JSON {"error": "..."}.
-    The temp directory is deleted after the response by SelfCleaningFileResponse.
-    """
     return _run_single_pdf_tool(
         request, prefix="edit_", max_size=EDIT_MAX_FILE_SIZE, processor=_process_edit_pdf
     )
 
 
+# ======================================================================
+# NEW TOOL 15: OCR PDF (Tesseract OCR -> Searchable PDF or Extracted Text)
+# ======================================================================
+_OCR_LANG_WHITELIST = {"eng", "urd", "ara", "hin", "fra", "deu", "spa", "eng+urd", "eng+ara"}
+
+
+def _process_ocr_pdf(request, input_path, work_dir):
+    """
+    POST /ocr-pdf/
+    Form-data:
+      file = <pdf>
+      lang = eng | urd | ara | hin | fra | deu | spa | eng+urd (default: eng)
+      output_format = pdf | txt (default: pdf -> searchable PDF with invisible text layer)
+      pages = optional page range e.g. "1-10"
+    """
+    lang = (request.POST.get("lang") or "eng").strip().lower()
+    # Map 2-letter codes if sent from frontend
+    lang_map = {"en": "eng", "ur": "urd", "ar": "ara", "hi": "hin", "fr": "fra", "de": "deu", "es": "spa"}
+    lang = lang_map.get(lang, lang)
+    if lang not in _OCR_LANG_WHITELIST:
+        lang = "eng"
+
+    out_fmt = (request.POST.get("output_format") or "pdf").strip().lower()
+    raw_pages = (request.POST.get("pages") or "").strip()
+
+    fitz = _import_fitz()
+    tesseract_bin = shutil.which("tesseract")
+    if not tesseract_bin:
+        raise PDFMergeError(
+            "Tesseract OCR is not installed on the server. Run: sudo apt install tesseract-ocr",
+            status=500,
+        )
+
+    try:
+        doc = fitz.open(input_path)
+    except Exception:
+        raise PDFMergeError("The PDF is corrupted or unreadable.")
+
+    try:
+        if doc.needs_pass:
+            raise PDFMergeError("The PDF is password protected. Unlock it first.")
+        total_pages = doc.page_count
+        if total_pages < 1:
+            raise PDFMergeError("The PDF contains no pages.")
+        if total_pages > OCR_MAX_PAGES and not raw_pages:
+            raise PDFMergeError(
+                f"PDF has {total_pages} pages; OCR maximum is {OCR_MAX_PAGES} pages at once. Specify a page range.",
+                status=413,
+            )
+
+        target_indexes = (
+            _expand_page_ranges(_parse_page_ranges(raw_pages), total_pages)
+            if raw_pages else list(range(total_pages))
+        )
+        if len(target_indexes) > OCR_MAX_PAGES:
+            raise PDFMergeError(f"Please select at most {OCR_MAX_PAGES} pages for OCR.", status=413)
+
+        from PIL import Image
+        try:
+            import pytesseract
+            has_pytesseract = True
+        except ImportError:
+            has_pytesseract = False
+
+        mat = fitz.Matrix(200 / 72.0, 200 / 72.0)  # 200 DPI for fast, accurate OCR
+
+        # Mode A: Plain text output (.txt)
+        if out_fmt == "txt":
+            extracted_pages = []
+            for idx in target_indexes:
+                pix = doc[idx].get_pixmap(matrix=mat, alpha=False)
+                img_path = os.path.join(work_dir, f"ocr_p{idx}.png")
+                pix.save(img_path)
+                if has_pytesseract:
+                    try:
+                        txt = pytesseract.image_to_string(Image.open(img_path), lang=lang, timeout=60)
+                    except Exception:
+                        txt = pytesseract.image_to_string(Image.open(img_path), lang="eng", timeout=60)
+                else:
+                    res = subprocess.run(
+                        [tesseract_bin, img_path, "stdout", "-l", lang],
+                        stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=60, check=False,
+                    )
+                    if res.returncode != 0 and lang != "eng":
+                        res = subprocess.run(
+                            [tesseract_bin, img_path, "stdout", "-l", "eng"],
+                            stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=60, check=False,
+                        )
+                    txt = res.stdout.decode("utf-8", errors="replace")
+                os.remove(img_path)
+                extracted_pages.append(f"--- Page {idx + 1} ---\n{txt.strip()}")
+
+            output_txt = os.path.join(work_dir, "output.txt")
+            with open(output_txt, "w", encoding="utf-8") as f:
+                f.write("\n\n".join(extracted_pages))
+            return output_txt, "_ocr.txt", "text/plain; charset=utf-8"
+
+        # Mode B: Searchable PDF output (.pdf)
+        out_doc = fitz.open()
+        for idx in target_indexes:
+            pix = doc[idx].get_pixmap(matrix=mat, alpha=False)
+            # 1. Try PyMuPDF native pdfocr_tobytes
+            if hasattr(pix, "pdfocr_tobytes"):
+                try:
+                    pdf_bytes = pix.pdfocr_tobytes(language=lang)
+                except Exception:
+                    pdf_bytes = pix.pdfocr_tobytes(language="eng")
+                ocr_page_doc = fitz.open("pdf", pdf_bytes)
+                out_doc.insert_pdf(ocr_page_doc)
+                ocr_page_doc.close()
+            else:
+                # 2. Fallback to pytesseract or tesseract CLI PDF output
+                img_path = os.path.join(work_dir, f"ocr_p{idx}.png")
+                pix.save(img_path)
+                if has_pytesseract:
+                    try:
+                        pdf_bytes = pytesseract.image_to_pdf_or_hocr(img_path, lang=lang, extension="pdf", timeout=60)
+                    except Exception:
+                        pdf_bytes = pytesseract.image_to_pdf_or_hocr(img_path, lang="eng", extension="pdf", timeout=60)
+                    ocr_page_doc = fitz.open("pdf", pdf_bytes)
+                    out_doc.insert_pdf(ocr_page_doc)
+                    ocr_page_doc.close()
+                else:
+                    base_out = os.path.join(work_dir, f"ocr_out_{idx}")
+                    res = subprocess.run(
+                        [tesseract_bin, img_path, base_out, "-l", lang, "pdf"],
+                        stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=60, check=False,
+                    )
+                    if res.returncode != 0 and lang != "eng":
+                        subprocess.run(
+                            [tesseract_bin, img_path, base_out, "-l", "eng", "pdf"],
+                            stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=60, check=False,
+                        )
+                    page_pdf_path = f"{base_out}.pdf"
+                    if os.path.exists(page_pdf_path):
+                        ocr_page_doc = fitz.open(page_pdf_path)
+                        out_doc.insert_pdf(ocr_page_doc)
+                        ocr_page_doc.close()
+                        os.remove(page_pdf_path)
+                if os.path.exists(img_path):
+                    os.remove(img_path)
+
+        output_path = os.path.join(work_dir, "output.pdf")
+        out_doc.save(output_path, garbage=3, deflate=True)
+        out_doc.close()
+        return output_path, "_ocr.pdf", "application/pdf"
+    finally:
+        doc.close()
+
+
+@csrf_exempt
+@require_POST
+@clerk_authenticated
+def ocr_pdf(request):
+    return _run_single_pdf_tool(
+        request, prefix="ocr_", max_size=OCR_MAX_FILE_SIZE, processor=_process_ocr_pdf
+    )
+
+
+# ======================================================================
+# NEW TOOL 16: WATERMARK PDF (Image Upload + Adjustable Transparency / Text)
+# ======================================================================
+def _prepare_transparent_watermark_png(img_path, out_png_path, opacity):
+    """Apply user-selected opacity (0.05 - 1.0) to the uploaded watermark/background image."""
+    from PIL import Image, ImageOps
+
+    with Image.open(img_path) as im:
+        w, h = im.size
+        if w * h > IMAGE_MAX_PIXELS:
+            raise PDFMergeError("Watermark image resolution is too large.", status=413)
+        try:
+            im = ImageOps.exif_transpose(im) or im
+        except Exception:
+            pass
+        rgba = im.convert("RGBA")
+        if w > 2400 or h > 2400:
+            rgba.thumbnail((2400, 2400), Image.Resampling.LANCZOS)
+
+        alpha = rgba.getchannel("A")
+        alpha = alpha.point(lambda p: int(round(p * opacity)))
+        rgba.putalpha(alpha)
+        rgba.save(out_png_path, "PNG")
+        return rgba.size
+
+
+def _compute_placement_rect(fitz, page_rect, item_w, item_h, position, margin=28):
+    pw, ph = page_rect.width, page_rect.height
+    x0, y0 = page_rect.x0, page_rect.y0
+
+    if position == "top-left":
+        x, y = x0 + margin, y0 + margin
+    elif position == "top-right":
+        x, y = x0 + pw - item_w - margin, y0 + margin
+    elif position == "bottom-left":
+        x, y = x0 + margin, y0 + ph - item_h - margin
+    elif position == "bottom-right":
+        x, y = x0 + pw - item_w - margin, y0 + ph - item_h - margin
+    elif position == "top-center":
+        x, y = x0 + (pw - item_w) / 2, y0 + margin
+    elif position == "bottom-center":
+        x, y = x0 + (pw - item_w) / 2, y0 + ph - item_h - margin
+    else:  # center
+        x, y = x0 + (pw - item_w) / 2, y0 + (ph - item_h) / 2
+
+    return fitz.Rect(x, y, x + item_w, y + item_h)
+
+
+def _process_watermark_pdf(request, input_path, work_dir):
+    """
+    POST /watermark-pdf/
+    Form-data:
+      file = <pdf>
+      watermark_image = <image file> (optional if text is provided)
+      text = <string> (optional fallback if no image is uploaded)
+      opacity = 0.05..1.0 OR 5..100 (default 0.30 / 30%)
+      scale = 0.1..1.0 OR 10..100 (% of page width, default 50%)
+      position = center | stretch | tile | bottom-right | bottom-left | top-right | top-left (default center)
+      layer = over | under (default over)
+      pages = optional page range e.g. "1,3,5-7"
+    """
+    wm_upload = request.FILES.get("watermark_image") or request.FILES.get("image")
+    wm_text = (request.POST.get("text") or "").strip()
+
+    if wm_upload is None and not wm_text:
+        raise PDFMergeError("Please upload a watermark/background image or enter watermark text.")
+
+    # Parse opacity (supports both 0.35 and 35)
+    raw_opacity = (request.POST.get("opacity") or "0.35").strip()
+    try:
+        opacity = float(raw_opacity)
+        if opacity > 1.0:
+            opacity = opacity / 100.0
+        opacity = max(0.05, min(1.0, opacity))
+    except ValueError:
+        raise PDFMergeError("'opacity' must be a number between 5 and 100.")
+
+    # Parse scale (supports 0.5 or 50)
+    raw_scale = (request.POST.get("scale") or "50").strip()
+    try:
+        scale_pct = float(raw_scale)
+        if scale_pct > 1.0:
+            scale_pct = scale_pct / 100.0
+        scale_pct = max(0.10, min(1.0, scale_pct))
+    except ValueError:
+        scale_pct = 0.50
+
+    position = (request.POST.get("position") or "center").strip().lower()
+    layer = (request.POST.get("layer") or "over").strip().lower()
+    overlay = layer != "under"
+    raw_pages = (request.POST.get("pages") or "").strip()
+
+    fitz = _import_fitz()
+    _check_pdf_readable(input_path, SPLIT_MAX_PAGES)
+
+    wm_png_path = None
+    wm_size = (200, 200)
+    if wm_upload is not None:
+        raw_img_path = _save_typed_upload(
+            wm_upload, work_dir, max_size=IMAGE_MAX_FILE_SIZE,
+            allowed_exts=IMAGE_EXTENSIONS, magic_check=_is_image_header, label="watermark image", index=1,
+        )
+        wm_png_path = os.path.join(work_dir, "watermark_rgba.png")
+        wm_size = _prepare_transparent_watermark_png(raw_img_path, wm_png_path, opacity)
+
+    doc = fitz.open(input_path)
+    try:
+        total_pages = doc.page_count
+        target_indexes = (
+            _expand_page_ranges(_parse_page_ranges(raw_pages), total_pages)
+            if raw_pages else list(range(total_pages))
+        )
+
+        for idx in target_indexes:
+            page = doc[idx]
+            rect = page.rect
+
+            if wm_png_path:
+                img_w, img_h = wm_size
+                aspect = img_h / max(1.0, float(img_w))
+
+                if position in ("stretch", "full", "background"):
+                    page.insert_image(rect, filename=wm_png_path, keep_proportion=False, overlay=overlay)
+                elif position == "tile":
+                    target_w = max(80.0, rect.width * min(0.35, scale_pct))
+                    target_h = target_w * aspect
+                    step_x = target_w * 1.35
+                    step_y = target_h * 1.35
+                    y = rect.y0 + 20
+                    while y < rect.y1:
+                        x = rect.x0 + 20
+                        while x < rect.x1:
+                            cell = fitz.Rect(x, y, x + target_w, y + target_h)
+                            page.insert_image(cell, filename=wm_png_path, keep_proportion=True, overlay=overlay)
+                            x += step_x
+                        y += step_y
+                else:
+                    target_w = rect.width * scale_pct
+                    target_h = target_w * aspect
+                    if target_h > rect.height * scale_pct:
+                        target_h = rect.height * scale_pct
+                        target_w = target_h / aspect
+                    target_rect = _compute_placement_rect(fitz, rect, target_w, target_h, position)
+                    page.insert_image(target_rect, filename=wm_png_path, keep_proportion=True, overlay=overlay)
+            else:
+                # Text watermark fallback rendered onto a transparent PNG so opacity & rotation work identically
+                from PIL import Image, ImageDraw, ImageFont
+                txt_img = Image.new("RGBA", (900, 300), (255, 255, 255, 0))
+                draw = ImageDraw.Draw(txt_img)
+                try:
+                    fnt = ImageFont.truetype(PDF_FONT_PATH, 64) if PDF_FONT_PATH else ImageFont.load_default(size=64)
+                except Exception:
+                    fnt = ImageFont.load_default()
+                alpha_int = int(round(255 * opacity))
+                draw.text((40, 110), wm_text[:60], fill=(120, 120, 120, alpha_int), font=fnt)
+                rot_img = txt_img.rotate(30, expand=True, resample=Image.Resampling.BICUBIC)
+                txt_png = os.path.join(work_dir, "wm_text.png")
+                rot_img.save(txt_png, "PNG")
+                tw = rect.width * scale_pct
+                th = tw * (rot_img.height / max(1.0, float(rot_img.width)))
+                target_rect = _compute_placement_rect(fitz, rect, tw, th, position)
+                page.insert_image(target_rect, filename=txt_png, keep_proportion=True, overlay=overlay)
+
+        output_path = os.path.join(work_dir, "output.pdf")
+        doc.save(output_path, garbage=3, deflate=True)
+    finally:
+        doc.close()
+
+    return output_path, "_watermarked.pdf", "application/pdf"
+
+
+@csrf_exempt
+@require_POST
+@clerk_authenticated
+def watermark_pdf(request):
+    return _run_single_pdf_tool(
+        request, prefix="watermark_", max_size=WATERMARK_MAX_FILE_SIZE, processor=_process_watermark_pdf
+    )
+
+
+# ======================================================================
+# NEW TOOL 17: SIGN PDF (Drawn Base64 Signature or Uploaded Image)
+# ======================================================================
+def _process_sign_pdf(request, input_path, work_dir):
+    """
+    POST /sign-pdf/
+    Form-data:
+      file = <pdf>
+      signature_data = data:image/png;base64,... (drawn on canvas)
+      OR signature_image = <image file>
+      position = bottom-right | bottom-left | bottom-center | center | top-right | top-left (default bottom-right)
+      scale = size % of page width (10..60, default 22)
+      pages = "last" | "all" | "first" | "1,3,5-7" (default "last")
+    """
+    sig_upload = request.FILES.get("signature_image")
+    sig_data = (request.POST.get("signature_data") or "").strip()
+
+    if sig_upload is None and not sig_data:
+        raise PDFMergeError("Please draw your signature or upload a signature image.")
+
+    sig_png_path = os.path.join(work_dir, "signature.png")
+
+    if sig_upload is not None:
+        raw_sig = _save_typed_upload(
+            sig_upload, work_dir, max_size=IMAGE_MAX_FILE_SIZE,
+            allowed_exts=IMAGE_EXTENSIONS, magic_check=_is_image_header, label="signature image", index=1,
+        )
+        _prepare_transparent_watermark_png(raw_sig, sig_png_path, opacity=1.0)
+    else:
+        if "," in sig_data:
+            sig_data = sig_data.split(",", 1)[1]
+        try:
+            raw_bytes = base64.b64decode(sig_data, validate=False)
+        except Exception:
+            raise PDFMergeError("Invalid signature data.")
+        if len(raw_bytes) < 20 or len(raw_bytes) > 10 * 1024 * 1024:
+            raise PDFMergeError("Signature image size is invalid.")
+        with open(sig_png_path, "wb") as f:
+            f.write(raw_bytes)
+
+    from PIL import Image
+    try:
+        with Image.open(sig_png_path) as im:
+            sig_w, sig_h = im.size
+    except Exception:
+        raise PDFMergeError("Could not read the signature image.")
+
+    position = (request.POST.get("position") or "bottom-right").strip().lower()
+    raw_pages = (request.POST.get("pages") or "last").strip().lower()
+    try:
+        scale_pct = float(request.POST.get("scale") or "22")
+        if scale_pct > 1.0:
+            scale_pct /= 100.0
+        scale_pct = max(0.08, min(0.75, scale_pct))
+    except ValueError:
+        scale_pct = 0.22
+
+    fitz = _import_fitz()
+    _check_pdf_readable(input_path, SPLIT_MAX_PAGES)
+
+    doc = fitz.open(input_path)
+    try:
+        total_pages = doc.page_count
+        if raw_pages in ("", "last"):
+            target_indexes = [total_pages - 1]
+        elif raw_pages == "first":
+            target_indexes = [0]
+        elif raw_pages == "all":
+            target_indexes = list(range(total_pages))
+        else:
+            target_indexes = _expand_page_ranges(_parse_page_ranges(raw_pages), total_pages)
+
+        aspect = sig_h / max(1.0, float(sig_w))
+        for idx in target_indexes:
+            page = doc[idx]
+            rect = page.rect
+            target_w = rect.width * scale_pct
+            target_h = target_w * aspect
+            target_rect = _compute_placement_rect(fitz, rect, target_w, target_h, position, margin=36)
+            page.insert_image(target_rect, filename=sig_png_path, keep_proportion=True, overlay=True)
+
+        output_path = os.path.join(work_dir, "output.pdf")
+        doc.save(output_path, garbage=3, deflate=True)
+    finally:
+        doc.close()
+
+    return output_path, "_signed.pdf", "application/pdf"
+
+
+@csrf_exempt
+@require_POST
+@clerk_authenticated
+def sign_pdf(request):
+    return _run_single_pdf_tool(
+        request, prefix="sign_", max_size=SIGN_MAX_FILE_SIZE, processor=_process_sign_pdf
+    )
+
+
+# ======================================================================
+# NEW TOOL 18: POWERPOINT (.PPTX / .PPT) TO PDF
+# ======================================================================
+def _process_powerpoint_to_pdf(request, input_path, work_dir):
+    output_path = os.path.join(work_dir, "output.pdf")
+
+    # 1. Try LibreOffice headless first for pixel-perfect slide conversion
+    for binary in ("libreoffice", "soffice"):
+        if shutil.which(binary):
+            try:
+                subprocess.run(
+                    [binary, "--headless", "--convert-to", "pdf", "--outdir", work_dir, input_path],
+                    cwd=work_dir, stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=120, check=False,
+                )
+                generated = os.path.join(work_dir, Path(input_path).stem + ".pdf")
+                if os.path.exists(generated) and os.path.getsize(generated) > 0:
+                    os.replace(generated, output_path)
+                    return output_path, ".pdf", "application/pdf"
+            except Exception as exc:
+                logger.warning("LibreOffice PPTX conversion failed, falling back to python-pptx: %s", exc)
+
+    # 2. Pure-Python Fallback using python-pptx + ReportLab (16:9 Landscape slides)
+    try:
+        from pptx import Presentation
+        from reportlab.lib import colors
+        from reportlab.lib.pagesizes import A4, landscape
+        from reportlab.lib.styles import ParagraphStyle, getSampleStyleSheet
+        from reportlab.lib.units import mm
+        from reportlab.platypus import PageBreak, Paragraph, SimpleDocTemplate, Spacer, Table, TableStyle
+    except ImportError:
+        raise PDFMergeError(
+            "Server is missing PowerPoint conversion tools. Install LibreOffice or python-pptx.",
+            status=500,
+        )
+
+    try:
+        prs = Presentation(input_path)
+    except Exception:
+        raise PDFMergeError("The PowerPoint file is corrupted or unreadable (use .pptx format).")
+
+    if len(prs.slides) == 0:
+        raise PDFMergeError("The presentation contains no slides.", status=422)
+    if len(prs.slides) > PPTX_MAX_SLIDES:
+        raise PDFMergeError(f"Presentation has {len(prs.slides)} slides; maximum is {PPTX_MAX_SLIDES}.", status=413)
+
+    font, font_bold = _register_pdf_font()
+    styles = getSampleStyleSheet()
+    slide_badge_style = ParagraphStyle(
+        "SlideBadge", parent=styles["Normal"], fontName=font_bold, fontSize=9, textColor=colors.HexColor("#7C3AED"), spaceAfter=4
+    )
+    title_style = ParagraphStyle(
+        "SlideTitle", parent=styles["Heading1"], fontName=font_bold, fontSize=22, leading=26, spaceAfter=12
+    )
+    bullet_style = ParagraphStyle(
+        "SlideBullet", parent=styles["Normal"], fontName=font, fontSize=13, leading=19, leftIndent=14, spaceAfter=8
+    )
+
+    story = []
+    for idx, slide in enumerate(prs.slides, start=1):
+        if idx > 1:
+            story.append(PageBreak())
+        story.append(Paragraph(f"Slide {idx} of {len(prs.slides)}", slide_badge_style))
+
+        title_text = ""
+        if slide.shapes.title and slide.shapes.title.text:
+            title_text = slide.shapes.title.text.strip()
+            if title_text:
+                story.append(Paragraph(_xml_escape(title_text), title_style))
+
+        wrote_body = False
+        for shape in slide.shapes:
+            if shape == slide.shapes.title:
+                continue
+            if getattr(shape, "has_text_frame", False) and shape.has_text_frame:
+                for para in shape.text_frame.paragraphs:
+                    txt = para.text.strip()
+                    if txt:
+                        story.append(Paragraph(f"• {_xml_escape(txt)}", bullet_style))
+                        wrote_body = True
+            elif getattr(shape, "has_table", False) and shape.has_table:
+                t_rows = []
+                for row in shape.table.rows:
+                    t_rows.append([_xlsx_cell_text(c.text) for c in row.cells])
+                if t_rows:
+                    tbl = Table(t_rows, repeatRows=1)
+                    tbl.setStyle(TableStyle([
+                        ("FONTNAME", (0, 0), (-1, -1), font),
+                        ("FONTSIZE", (0, 0), (-1, -1), 10),
+                        ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#EDE9FE")),
+                        ("GRID", (0, 0), (-1, -1), 0.5, colors.HexColor("#CBD5E1")),
+                        ("PADDING", (0, 0), (-1, -1), 5),
+                    ]))
+                    story.append(Spacer(1, 4 * mm))
+                    story.append(tbl)
+                    wrote_body = True
+
+        if not title_text and not wrote_body:
+            story.append(Paragraph("<i>(Visual / Image Slide)</i>", bullet_style))
+
+    doc = SimpleDocTemplate(
+        output_path, pagesize=landscape(A4),
+        leftMargin=20 * mm, rightMargin=20 * mm, topMargin=18 * mm, bottomMargin=18 * mm,
+        title=Path(input_path).stem, author="SnapPDF",
+    )
+    doc.build(story)
+    return output_path, ".pdf", "application/pdf"
+
+
+@csrf_exempt
+@require_POST
+@clerk_authenticated
+def powerpoint_to_pdf(request):
+    return _run_single_file_tool(
+        request, prefix="pptx2pdf_", max_size=PPTX_MAX_FILE_SIZE,
+        allowed_exts=PPTX_EXTENSIONS, magic_check=_is_office_header, label="PowerPoint (.pptx)",
+        processor=_process_powerpoint_to_pdf,
+    )
+
+
+# ======================================================================
+# NEW TOOL 19: ADD PAGE NUMBERS ON EVERY PAGE
+# ======================================================================
+def _process_add_page_numbers(request, input_path, work_dir):
+    """
+    POST /add-page-numbers/
+    Form-data:
+      file = <pdf>
+      position = bottom-center | bottom-right | bottom-left | top-center | top-right | top-left (default bottom-center)
+      format = "page_of_total" ("Page 1 of 10") | "slash" ("1 / 10") | "simple" ("1") | "dash" ("- 1 -")
+      start_number = integer starting number (default 1)
+      font_size = 8..36 (default 11)
+      color = #RRGGBB (default #000000)
+    """
+    position = (request.POST.get("position") or "bottom-center").strip().lower()
+    fmt = (request.POST.get("format") or "page_of_total").strip().lower()
+    color = _hex_to_rgb(request.POST.get("color") or "#333333", "Color")
+
+    try:
+        start_num = max(1, int(request.POST.get("start_number") or 1))
+    except ValueError:
+        start_num = 1
+
+    try:
+        font_size = max(7.0, min(36.0, float(request.POST.get("font_size") or 11.0)))
+    except ValueError:
+        font_size = 11.0
+
+    fitz = _import_fitz()
+    _check_pdf_readable(input_path, SPLIT_MAX_PAGES)
+
+    doc = fitz.open(input_path)
+    try:
+        total = doc.page_count
+        for idx, page in enumerate(doc):
+            num = start_num + idx
+            total_disp = total + start_num - 1
+            if fmt == "simple":
+                label = f"{num}"
+            elif fmt == "slash":
+                label = f"{num} / {total_disp}"
+            elif fmt == "dash":
+                label = f"- {num} -"
+            else:
+                label = f"Page {num} of {total_disp}"
+
+            rect = page.rect
+            box_w = 220
+            box_h = font_size * 2.2
+            margin_x = 32
+            margin_y = 22
+
+            if "top" in position:
+                y0 = rect.y0 + margin_y
+            else:
+                y0 = rect.y1 - margin_y - box_h
+
+            if "left" in position:
+                x0 = rect.x0 + margin_x
+                align = fitz.TEXT_ALIGN_LEFT
+            elif "right" in position:
+                x0 = rect.x1 - margin_x - box_w
+                align = fitz.TEXT_ALIGN_RIGHT
+            else:
+                x0 = rect.x0 + (rect.width - box_w) / 2
+                align = fitz.TEXT_ALIGN_CENTER
+
+            target_box = fitz.Rect(x0, y0, x0 + box_w, y0 + box_h) * page.derotation_matrix
+            page.insert_textbox(
+                target_box,
+                label,
+                fontsize=font_size,
+                fontname="helv",
+                color=color,
+                align=align,
+                rotate=page.rotation,
+            )
+
+        output_path = os.path.join(work_dir, "output.pdf")
+        doc.save(output_path, garbage=3, deflate=True)
+    finally:
+        doc.close()
+
+    return output_path, "_numbered.pdf", "application/pdf"
+
+
+@csrf_exempt
+@require_POST
+@clerk_authenticated
+def add_page_numbers(request):
+    return _run_single_pdf_tool(
+        request, prefix="pagenum_", max_size=PAGENUM_MAX_FILE_SIZE, processor=_process_add_page_numbers
+    )

@@ -1,16 +1,21 @@
 <!DOCTYPE html>
-<html lang="en" class="scroll-smooth auth-pending">
+<html lang="en" class="scroll-smooth">
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>SnapPDF | Every PDF tool in one place</title>
-  <meta name="description" content="Merge, split, compress, convert, protect and unlock PDFs in seconds.">
-  <meta name="color-scheme" content="dark">
+  <title>SyntaxPDF | Online PDF tools for PDF lovers</title>
+  <meta name="description" content="SyntaxPDF is your number one web app for editing PDF with ease. Merge, split, compress, convert, rotate, unlock and watermark PDFs with just a few clicks.">
+  <meta name="color-scheme" content="light dark">
   <link rel="preconnect" href="https://fonts.googleapis.com">
-  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&display=swap" rel="stylesheet">
   <script src="https://cdn.tailwindcss.com"></script>
-  
-  <!-- Updated Clerk SDK Script -->
+
+  <!-- PDF.js (Live Previews, Visual Crop & Sejda Text Layer Detection) -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
+  <!-- pdf-lib (Instant Client-Side Merge/Split/Image2PDF & Vector PDF Saving) -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf-lib/1.17.1/pdf-lib.min.js"></script>
+
+  <!-- Clerk SDK Script -->
   <script 
     async 
     crossorigin="anonymous" 
@@ -23,67 +28,120 @@
       theme: {
         extend: {
           fontFamily: { sans: ["Inter", "system-ui", "sans-serif"] },
+          colors: {
+            brandRed: "#e5322d",
+            brandDark: "#1e1e26",
+            syntaxOlive: "#81826b",
+            syntaxSilver: "#c4c4be",
+          },
           boxShadow: {
+            card: "0 2px 12px rgba(0,0,0,0.06), 0 1px 2px rgba(0,0,0,0.04)",
+            cardHover: "0 14px 30px rgba(0,0,0,0.10), 0 4px 10px rgba(0,0,0,0.05)",
             glass: "0 10px 40px rgba(0,0,0,0.45), inset 0 1px 0 rgba(255,255,255,0.12)",
-            glow: "0 0 0 1px rgba(255,255,255,0.12), 0 20px 60px rgba(0,0,0,0.6), 0 0 50px rgba(139,92,246,0.15)",
+            glow: "0 0 0 1px rgba(255,255,255,0.12), 0 20px 60px rgba(0,0,0,0.6), 0 0 50px rgba(229,50,45,0.18)",
           },
           keyframes: {
-            pop:    { "0%": { opacity: 0, transform: "translateY(18px) scale(.96)" }, "100%": { opacity: 1, transform: "none" } },
-            fade:   { "0%": { opacity: 0 }, "100%": { opacity: 1 } },
-            slide:  { "0%": { transform: "translateX(-100%)" }, "100%": { transform: "translateX(260%)" } },
-            drift1: { "0%,100%": { transform: "translate(0,0) scale(1)" }, "50%": { transform: "translate(12vmax,8vmax) scale(1.15)" } },
-            drift2: { "0%,100%": { transform: "translate(0,0) scale(1)" }, "50%": { transform: "translate(-10vmax,-8vmax) scale(1.1)" } },
-            drift3: { "0%,100%": { transform: "translate(0,0) scale(1)" }, "50%": { transform: "translate(-8vmax,10vmax) scale(1.2)" } },
-            shimmer:{ "0%,60%": { transform: "translateX(-100%)" }, "100%": { transform: "translateX(100%)" } },
+            pop:   { "0%": { opacity: 0, transform: "translateY(14px) scale(.97)" }, "100%": { opacity: 1, transform: "none" } },
+            fade:  { "0%": { opacity: 0 }, "100%": { opacity: 1 } },
+            slide: { "0%": { transform: "translateX(-100%)" }, "100%": { transform: "translateX(260%)" } },
           },
           animation: {
-            pop: "pop .4s cubic-bezier(.2,.8,.2,1) both", fade: "fade .25s ease both", slide: "slide 1.1s ease-in-out infinite",
-            drift1: "drift1 26s ease-in-out infinite", drift2: "drift2 32s ease-in-out infinite", drift3: "drift3 38s ease-in-out infinite",
-            shimmer: "shimmer 3s ease-in-out infinite",
+            pop: "pop .3s cubic-bezier(.2,.8,.2,1) both",
+            fade: "fade .2s ease both",
+            slide: "slide 1.1s ease-in-out infinite",
           },
         },
       },
     };
   </script>
+
   <style>
     .no-scroll { overflow: hidden; }
     .icon svg { width: 100%; height: 100%; }
-    .glass {
-      background: linear-gradient(135deg, rgba(255,255,255,0.09), rgba(255,255,255,0.03));
-      -webkit-backdrop-filter: blur(22px) saturate(160%); backdrop-filter: blur(22px) saturate(160%);
-      border: 1px solid rgba(255,255,255,0.10);
-    }
-    .card { --mx: 50%; --my: 50%; }
-    .card::before {
-      content: ""; position: absolute; inset: 0; border-radius: inherit; pointer-events: none; opacity: 0; transition: opacity .3s;
-      background: radial-gradient(320px circle at var(--mx) var(--my), rgba(255,255,255,0.12), transparent 60%);
-    }
-    .card:hover::before { opacity: 1; }
-    select option { background: #0f0f14; color: #fff; }
-    @supports not (backdrop-filter: blur(1px)) { .glass { background: rgba(20,18,32,0.92); } }
-    
-    html.auth-pending body > *:not(#clerk-auth-modal):not(#icon-sprite):not(script):not(style) { display: none !important; }
     .is-hidden { display: none !important; }
-    
-    #clerk-auth-modal {
-      position: fixed; inset: 0; z-index: 60; display: flex; overflow-y: auto;
-      padding: 1.5rem 1rem;
-      background: radial-gradient(ellipse 70% 45% at 50% -5%, rgba(139,92,246,.25), transparent 70%), #07060d;
+
+    /* Dark Glass for Modals & Studio (Preserving SnapPDF Modal Aesthetic) */
+    .glass {
+      background: linear-gradient(135deg, rgba(24, 24, 34, 0.96), rgba(14, 14, 22, 0.98));
+      -webkit-backdrop-filter: blur(22px) saturate(160%);
+      backdrop-filter: blur(22px) saturate(160%);
+      border: 1px solid rgba(255, 255, 255, 0.12);
     }
-    #clerk-auth-modal[hidden] { display: none; }
+    select option { background: #14141d; color: #fff; }
+
+    /* iLovePDF Soft Background Mesh */
+    .ilovepdf-hero-bg {
+      background:
+        radial-gradient(ellipse 55% 50% at 15% 10%, rgba(255, 228, 230, 0.7), transparent 70%),
+        radial-gradient(ellipse 50% 45% at 85% 15%, rgba(243, 232, 255, 0.65), transparent 70%),
+        #f5f5fa;
+    }
+
+    /* SyntaxPDF Custom Logo Typography matching uploaded screenshot */
+    .syntax-logo {
+      font-family: "Inter", system-ui, sans-serif;
+      font-weight: 900;
+      letter-spacing: -0.045em;
+      line-height: 1;
+      display: inline-flex;
+      align-items: center;
+      user-select: none;
+    }
+    .syntax-logo .part-synta { color: #7e8069; }
+    .syntax-logo .part-xpdf  { color: #b8b8b0; }
+    .syntax-logo-dark .part-synta { color: #9a9c82; }
+    .syntax-logo-dark .part-xpdf  { color: #d8d8d2; }
+
+    /* Category Filter Pills (iLovePDF style) */
+    .cat-pill {
+      padding: 0.5rem 1.15rem;
+      border-radius: 9999px;
+      font-size: 0.85rem;
+      font-weight: 600;
+      border: 1px solid #e2e8f0;
+      background: #ffffff;
+      color: #334155;
+      transition: all 0.18s ease;
+      white-space: nowrap;
+      cursor: pointer;
+    }
+    .cat-pill:hover {
+      border-color: #cbd5e1;
+      background: #f8fafc;
+      color: #0f172a;
+    }
+    .cat-pill.active {
+      background: #1e1e26;
+      color: #ffffff;
+      border-color: #1e1e26;
+      box-shadow: 0 4px 12px rgba(30, 30, 38, 0.18);
+    }
+
+    /* Clerk Auth Gate Modal */
+    #clerk-auth-modal {
+      position: fixed; inset: 0; z-index: 70; display: flex; overflow-y: auto;
+      padding: 1.5rem 1rem;
+      background: rgba(10, 10, 18, 0.82);
+      backdrop-filter: blur(10px);
+    }
+    #clerk-auth-modal[hidden] { display: none !important; }
     #clerk-auth-content {
       margin: auto; width: 100%; max-width: 26rem;
-      display: flex; flex-direction: column; align-items: center; gap: 1.25rem;
+      display: flex; flex-direction: column; align-items: center; gap: 1.1rem;
+      padding: 2rem 1.5rem;
+      border-radius: 1.5rem;
+      background: #0d0c16;
+      border: 1px solid rgba(255,255,255,0.12);
+      box-shadow: 0 25px 70px rgba(0,0,0,0.65);
     }
     [data-auth-tab] {
       padding: .55rem 1rem; border-radius: 9999px; color: rgba(255,255,255,.6);
       transition: background .2s, color .2s; cursor: pointer;
     }
     [data-auth-tab]:hover { color: #fff; }
-    [data-auth-tab][aria-selected="true"] { background: rgba(255,255,255,.14); color: #fff; }
-    @media (prefers-reduced-motion: reduce) { *, *::before, *::after { animation: none !important; transition: none !important; } }
+    [data-auth-tab][aria-selected="true"] { background: #e5322d; color: #fff; }
 
-    /* ================= CLERK PROFILE MENU CENTER, BLUR & WHITE TEXT FIX ================= */
+    /* Clerk Profile Popover Center Fix */
     .cl-userButtonPopoverBox {
       position: fixed !important;
       top: 50% !important;
@@ -95,40 +153,58 @@
       border-radius: 1rem !important;
       background-color: #07060d !important;
     }
-    .cl-userButtonPopoverBox::before {
-      content: "";
-      position: fixed;
-      top: -200vh; left: -200vw; bottom: -200vh; right: -200vw;
-      background: rgba(0, 0, 0, 0.65);
-      backdrop-filter: blur(8px);
-      z-index: -1;
-      pointer-events: none;
+    .cl-userButtonPopoverCard * { color: #ffffff !important; }
+    .cl-userPreviewSecondaryIdentifier { color: rgba(255,255,255,0.5) !important; }
+
+    /* Sejda Editor & Visual Crop Styles */
+    .sejda-text-hit {
+      position: absolute;
+      border: 1px dashed transparent;
+      border-radius: 3px;
+      cursor: text;
+      transition: background .12s, border-color .12s;
     }
-    
-    /* Ziddi (Brute-force) White Text for all items inside the Clerk Profile Card */
-    .cl-userButtonPopoverCard * {
-      color: #ffffff !important;
+    .sejda-text-hit:hover {
+      background: rgba(229, 50, 45, 0.12);
+      border-color: rgba(229, 50, 45, 0.75);
     }
-    /* Mute secondary email text slightly so it looks premium */
-    .cl-userPreviewSecondaryIdentifier {
-      color: rgba(255,255,255,0.5) !important;
+    .sejda-el {
+      position: absolute;
+      box-sizing: border-box;
+      user-select: none;
     }
-    .cl-userButtonPopoverActionButton:hover {
-      background-color: rgba(255,255,255,0.05) !important;
+    .sejda-el.is-active {
+      outline: 2px solid #e5322d;
+      box-shadow: 0 4px 16px rgba(229,50,45,0.25);
     }
+    .sejda-el .txt-editor {
+      width: 100%;
+      height: 100%;
+      outline: none;
+      line-height: 1.2;
+      white-space: pre-wrap;
+      word-break: break-word;
+      cursor: text;
+      user-select: text;
+      font-family: Helvetica, Arial, sans-serif;
+    }
+    .sejda-handle {
+      position: absolute;
+      right: -5px;
+      bottom: -5px;
+      width: 11px;
+      height: 11px;
+      border-radius: 999px;
+      background: #e5322d;
+      border: 2px solid #fff;
+      cursor: nwse-resize;
+      display: none;
+    }
+    .sejda-el.is-active .sejda-handle { display: block; }
   </style>
 </head>
 
-<body class="bg-[#07060d] text-white antialiased min-h-screen overflow-x-hidden">
-
-  <!-- ================= LIQUID BACKGROUND ================= -->
-  <div class="fixed inset-0 -z-10 overflow-hidden pointer-events-none" aria-hidden="true">
-    <div class="absolute inset-0 bg-[radial-gradient(ellipse_70%_45%_at_50%_-5%,rgba(139,92,246,0.25),transparent_70%)]"></div>
-    <span class="absolute -top-[12vmax] -left-[10vmax] w-[46vmax] h-[46vmax] rounded-full bg-violet-600/40 blur-[90px] animate-drift1"></span>
-    <span class="absolute -bottom-[14vmax] -right-[8vmax] w-[40vmax] h-[40vmax] rounded-full bg-blue-600/35 blur-[90px] animate-drift2"></span>
-    <span class="absolute top-[35%] left-[45%] w-[28vmax] h-[28vmax] rounded-full bg-fuchsia-500/25 blur-[90px] animate-drift3"></span>
-    <div class="absolute inset-0 opacity-[0.35] [background-image:linear-gradient(rgba(255,255,255,0.05)_1px,transparent_1px),linear-gradient(90deg,rgba(255,255,255,0.05)_1px,transparent_1px)] [background-size:64px_64px] [mask-image:radial-gradient(ellipse_80%_60%_at_50%_0%,#000_20%,transparent_100%)]"></div>
-  </div>
+<body class="bg-[#f5f5fa] text-slate-900 antialiased min-h-screen overflow-x-hidden">
 
   <!-- ================= SVG ICON SPRITE ================= -->
   <svg id="icon-sprite" width="0" height="0" class="absolute" aria-hidden="true">
@@ -153,192 +229,734 @@
       <symbol id="i-upload" viewBox="0 0 24 24"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" x2="12" y1="3" y2="15"/></symbol>
       <symbol id="i-x" viewBox="0 0 24 24"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></symbol>
       <symbol id="i-menu" viewBox="0 0 24 24"><path d="M4 6h16"/><path d="M4 12h16"/><path d="M4 18h16"/></symbol>
+      <symbol id="i-grid" viewBox="0 0 24 24"><circle cx="5" cy="5" r="1.8"/><circle cx="12" cy="5" r="1.8"/><circle cx="19" cy="5" r="1.8"/><circle cx="5" cy="12" r="1.8"/><circle cx="12" cy="12" r="1.8"/><circle cx="19" cy="12" r="1.8"/><circle cx="5" cy="19" r="1.8"/><circle cx="12" cy="19" r="1.8"/><circle cx="19" cy="19" r="1.8"/></symbol>
       <symbol id="i-shield" viewBox="0 0 24 24"><path d="M20 13c0 5-3.5 7.5-7.66 8.95a1 1 0 0 1-.67-.01C7.5 20.5 4 18 4 13V6a1 1 0 0 1 1-1c2 0 4.5-1.2 6.24-2.72a1.17 1.17 0 0 1 1.52 0C14.51 3.81 17 5 19 5a1 1 0 0 1 1 1z"/><path d="m9 12 2 2 4-4"/></symbol>
       <symbol id="i-zap" viewBox="0 0 24 24"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></symbol>
       <symbol id="i-chevron" viewBox="0 0 24 24"><path d="m9 18 6-6-6-6"/></symbol>
+      <symbol id="i-trash" viewBox="0 0 24 24"><path d="M3 6h18"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6"/><path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></symbol>
+      <symbol id="i-undo" viewBox="0 0 24 24"><path d="M3 7v6h6"/><path d="M21 17a9 9 0 0 0-9-9 9 9 0 0 0-6 2.3L3 13"/></symbol>
     </defs>
   </svg>
 
-  <!-- ================= NAVBAR ================= -->
-  <header class="sticky top-3 z-40 mx-auto max-w-6xl px-4 sm:px-6">
-    <nav class="glass rounded-full h-14 px-4 sm:px-5 flex items-center justify-between shadow-glass">
-      <div class="flex items-center gap-4">
-        <a href="#top" class="flex items-center gap-2.5 font-extrabold tracking-tight">
-          <span class="grid place-items-center w-8 h-8 rounded-xl bg-gradient-to-br from-violet-500 to-blue-500 shadow-[0_6px_20px_rgba(139,92,246,0.5)]">
-            <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><use href="#i-logo"/></svg>
+  <!-- ================= ILOVEPDF-STYLE STICKY TOP NAVBAR ================= -->
+  <header class="sticky top-0 z-40 bg-white border-b border-slate-200/90 shadow-sm">
+    <nav class="mx-auto max-w-[1380px] h-[60px] px-4 sm:px-6 flex items-center justify-between gap-4">
+      <!-- Left: SyntaxPDF Brand Logo + Primary Links -->
+      <div class="flex items-center gap-7">
+        <a href="#top" class="flex items-center gap-2 focus:outline-none" aria-label="SyntaxPDF Home">
+          <!-- Exact SyntaxPDF Logo Replication (Synta in Olive-Grey + xPDF in Light Silver-Grey) -->
+          <span class="syntax-logo text-2xl sm:text-[28px]">
+            <span class="part-synta">Synta</span><span class="part-xpdf">xPDF</span>
           </span>
-          SnapPDF
         </a>
+
+        <div class="hidden lg:flex items-center gap-6 text-[13px] font-bold tracking-wide text-slate-700 uppercase">
+          <button type="button" data-quick-tool="merge" class="hover:text-brandRed transition">Merge PDF</button>
+          <button type="button" data-quick-tool="split" class="hover:text-brandRed transition">Split PDF</button>
+          <button type="button" data-quick-tool="compress" class="hover:text-brandRed transition">Compress PDF</button>
+          <button type="button" data-filter-jump="convert" class="flex items-center gap-1 hover:text-brandRed transition">
+            <span>Convert PDF</span>
+            <svg class="w-3.5 h-3.5 rotate-90" fill="none" stroke="currentColor" stroke-width="2.2"><use href="#i-chevron"/></svg>
+          </button>
+          <button type="button" data-filter-jump="all" class="flex items-center gap-1 hover:text-brandRed transition">
+            <span>All PDF Tools</span>
+            <svg class="w-3.5 h-3.5 rotate-90" fill="none" stroke="currentColor" stroke-width="2.2"><use href="#i-chevron"/></svg>
+          </button>
+        </div>
+      </div>
+
+      <!-- Right: Free Usage Pill + Login / Sign up + Clerk Profile + App Switcher Icon -->
+      <div class="flex items-center gap-2.5 sm:gap-3.5">
+        <!-- Free Guest Document Counter Badge -->
+        <span id="freeUsageBadge" class="hidden sm:inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-semibold bg-amber-50 text-amber-800 border border-amber-200" title="3 documents can be processed without an account">
+          <span class="w-2 h-2 rounded-full bg-emerald-500"></span>
+          <span id="freeUsageText">3/3 Free Docs Left</span>
+        </span>
+
+        <!-- Shown when logged out -->
+        <div id="navGuestActions" class="flex items-center gap-2 sm:gap-3">
+          <button type="button" id="navLoginBtn" class="text-sm font-semibold text-slate-700 hover:text-brandRed px-2 py-1.5 transition">Login</button>
+          <button type="button" id="navSignupBtn" class="text-sm font-bold text-white bg-brandRed hover:bg-[#d12823] px-4 py-2 rounded-lg shadow-sm transition">Sign up</button>
+        </div>
+
+        <!-- Shown when signed in with Clerk -->
         <div data-clerk-user-button class="flex items-center"></div>
+
+        <!-- 9-dots Menu Button (Opens Support / Ideas / About Quick Menu) -->
+        <button id="supportBtnTop" type="button" class="p-2 rounded-lg text-slate-700 hover:bg-slate-100 transition" title="Support & Send Ideas">
+          <svg class="w-5 h-5" fill="currentColor"><use href="#i-grid"/></svg>
+        </button>
+
+        <button id="menuBtn" class="lg:hidden grid place-items-center w-9 h-9 rounded-lg hover:bg-slate-100 text-slate-700" aria-label="Open menu" aria-expanded="false">
+          <svg class="w-5 h-5" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><use href="#i-menu"/></svg>
+        </button>
       </div>
-      <div class="hidden md:flex items-center gap-1 text-sm font-medium text-white/60">
-        <a href="#tools" class="px-3 py-1.5 rounded-full hover:bg-white/10 hover:text-white transition">Tools</a>
-        <a href="#upcoming" class="px-3 py-1.5 rounded-full hover:bg-white/10 hover:text-white transition">Upcoming</a>
-        <!-- NEW ABOUT BUTTON -->
-        <button id="aboutBtn" type="button" class="px-3 py-1.5 rounded-full hover:bg-white/10 hover:text-white transition">About</button>
-        
-        <a href="#" class="js-start-free ml-2 px-4 py-1.5 rounded-full border border-white/20 bg-white/10 text-white hover:bg-white/20 transition">Start free</a>
-      </div>
-      <button id="menuBtn" class="md:hidden grid place-items-center w-9 h-9 rounded-full hover:bg-white/10" aria-label="Open menu" aria-expanded="false">
-        <svg class="w-5 h-5" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><use href="#i-menu"/></svg>
-      </button>
     </nav>
-    <div id="mobileMenu" class="md:hidden hidden glass mt-2 rounded-2xl p-2 text-sm font-medium shadow-glass">
-      <a href="#tools" class="block px-4 py-2.5 rounded-xl hover:bg-white/10">Tools</a>
-      <a href="#upcoming" class="block px-4 py-2.5 rounded-xl hover:bg-white/10">Upcoming</a>
-      <!-- NEW ABOUT BUTTON FOR MOBILE -->
-      <button id="mobileAboutBtn" type="button" class="block w-full text-left px-4 py-2.5 rounded-xl hover:bg-white/10">About</button>
-      
-      <a href="#" class="js-start-free block mt-1 px-4 py-2.5 rounded-xl bg-white/10 border border-white/15 text-center">Start free</a>
+
+    <!-- Mobile Navigation Drawer -->
+    <div id="mobileMenu" class="lg:hidden hidden bg-white border-t border-slate-200 px-4 py-3 space-y-1.5 text-sm font-semibold text-slate-700 shadow-lg">
+      <div class="py-1.5 px-3 rounded-lg bg-slate-100 text-xs font-bold text-slate-600 flex items-center justify-between">
+        <span>Guest Free Quota:</span>
+        <span id="mobileFreeUsageText" class="text-brandRed">3/3 Free Docs Left</span>
+      </div>
+      <button type="button" data-quick-tool="merge" class="block w-full text-left px-3 py-2 rounded-lg hover:bg-slate-100">Merge PDF</button>
+      <button type="button" data-quick-tool="split" class="block w-full text-left px-3 py-2 rounded-lg hover:bg-slate-100">Split PDF</button>
+      <button type="button" data-quick-tool="compress" class="block w-full text-left px-3 py-2 rounded-lg hover:bg-slate-100">Compress PDF</button>
+      <button type="button" data-quick-tool="edit" class="block w-full text-left px-3 py-2 rounded-lg hover:bg-slate-100">Edit PDF (Sejda Studio)</button>
+      <button type="button" id="mobileAboutBtn" class="block w-full text-left px-3 py-2 rounded-lg hover:bg-slate-100">About SyntaxPDF</button>
+      <button type="button" id="mobileSupportBtn" class="block w-full text-left px-3 py-2 rounded-lg hover:bg-slate-100">Support & Submit New Idea</button>
+      <button type="button" id="mobilePrivacyBtn" class="block w-full text-left px-3 py-2 rounded-lg hover:bg-slate-100">Privacy Policy</button>
+      <button type="button" id="mobileTermsBtn" class="block w-full text-left px-3 py-2 rounded-lg hover:bg-slate-100">Terms & Conditions</button>
     </div>
   </header>
 
-  <main id="top" class="mx-auto max-w-6xl px-4 sm:px-6">
+  <main id="top">
+    <!-- ================= ILOVEPDF HERO & CATEGORY TABS + TOOLS GRID/LIST ================= -->
+    <section class="ilovepdf-hero-bg pt-10 pb-16 sm:pt-14 sm:pb-24 px-4 sm:px-6 border-b border-slate-200/80">
+      <div class="mx-auto max-w-[1320px] text-center">
+        <h1 class="text-3xl sm:text-[42px] font-extrabold tracking-tight text-[#26262e] leading-[1.15]">
+          Every tool you need to work with PDFs in one place
+        </h1>
+        <p class="mt-3.5 max-w-3xl mx-auto text-slate-600 text-base sm:text-[20px] font-normal leading-relaxed">
+          Every tool you need to use PDFs, at your fingertips. All are 100% FREE and easy to use! Merge, split, compress, convert, rotate, unlock and watermark PDFs with just a few clicks.
+        </p>
 
-    <!-- ================= HERO ================= -->
-    <section class="pt-14 pb-10 sm:pt-24 sm:pb-16 text-center">
-      <span class="inline-flex items-center gap-2 px-3.5 py-1.5 rounded-full glass text-xs font-medium text-white/70">
-        <span class="w-2 h-2 rounded-full bg-emerald-400 shadow-[0_0_10px_#34d399]"></span> 13 tools live · files auto-deleted
-      </span>
-      <h1 class="mt-6 text-4xl sm:text-6xl font-extrabold tracking-tight leading-[1.05]">
-        Every PDF tool you need,<br class="hidden sm:block">
-        <span class="bg-gradient-to-r from-violet-300 via-fuchsia-300 to-blue-300 bg-clip-text text-transparent">flowing in one place.</span>
-      </h1>
-      <p class="mt-5 max-w-xl mx-auto text-white/60 text-base sm:text-lg leading-relaxed">Merge, split, compress, convert, protect and unlock your documents. Fast, private, and free.</p>
-      <div class="mt-9 grid grid-cols-3 gap-3 max-w-md mx-auto text-xs sm:text-sm">
-        <div class="glass rounded-2xl p-3"><div class="font-bold text-xl">13</div><div class="text-white/50">Tools</div></div>
-        <div class="glass rounded-2xl p-3"><div class="font-bold text-xl">0</div><div class="text-white/50">Files kept</div></div>
-        <div class="glass rounded-2xl p-3"><div class="font-bold text-xl">100%</div><div class="text-white/50">Free</div></div>
-      </div>
-    </section>
-
-    <!-- ================= ACTIVE TOOLS ================= -->
-    <section id="tools" class="py-6 md:py-8 scroll-mt-24">
-      <div class="flex items-end justify-between mb-5">
-        <div>
-          <h2 class="text-xl sm:text-2xl font-bold tracking-tight">All tools</h2>
-          <p class="text-sm text-white/50 mt-1">Tap a card to upload and convert.</p>
+        <!-- Category Filter Pills (Exact iLovePDF Bar) -->
+        <div id="categoryBar" class="mt-8 flex items-center justify-start sm:justify-center gap-2 overflow-x-auto pb-2 no-scrollbar">
+          <button type="button" data-cat="all" class="cat-pill active">All</button>
+          <button type="button" data-cat="organize" class="cat-pill">Organize PDF</button>
+          <button type="button" data-cat="optimize" class="cat-pill">Optimize PDF</button>
+          <button type="button" data-cat="convert" class="cat-pill">Convert PDF</button>
+          <button type="button" data-cat="edit" class="cat-pill">Edit PDF</button>
+          <button type="button" data-cat="security" class="cat-pill">PDF Security</button>
         </div>
-        <span class="text-xs font-semibold px-2.5 py-1 rounded-full bg-emerald-400/10 text-emerald-300 border border-emerald-400/20">Live</span>
+
+        <!-- TOOLS CONTAINER: Mobile = List View (grid-cols-1) | Laptop/Desktop = Grid View (md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5) -->
+        <div id="tools" class="mt-7 text-left scroll-mt-20">
+          <div id="toolGrid" class="grid grid-cols-1 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-3 sm:gap-4"></div>
+        </div>
       </div>
-      <div id="toolGrid" class="grid grid-cols-1 md:grid-cols-3 lg:grid-cols-4 gap-2.5 md:gap-4"></div>
     </section>
 
-    <!-- ================= UPCOMING ================= -->
-    <section id="upcoming" class="py-6 md:py-8 scroll-mt-24">
-      <div class="mb-5">
-        <h2 class="text-xl sm:text-2xl font-bold tracking-tight">Upcoming</h2>
-        <p class="text-sm text-white/50 mt-1">Tools that are on the way or temporarily offline.</p>
+    <!-- ================= SECTION 2: "WORK YOUR WAY" (3 FEATURE CARDS LIKE ILOVEPDF) ================= -->
+    <section class="py-16 sm:py-20 px-4 sm:px-6 bg-white">
+      <div class="mx-auto max-w-6xl">
+        <h2 class="text-center text-2xl sm:text-4xl font-extrabold text-[#26262e] tracking-tight">Work your way</h2>
+        <div class="mt-10 grid grid-cols-1 md:grid-cols-3 gap-6">
+          <!-- Card 1 -->
+          <div class="rounded-3xl bg-white border border-slate-200/90 shadow-card hover:shadow-cardHover transition overflow-hidden flex flex-col">
+            <div class="h-44 bg-[#fdece9] p-6 flex items-center justify-center">
+              <div class="w-full max-w-[240px] rounded-xl bg-white shadow-md p-4 border border-slate-100">
+                <div class="flex gap-1.5 mb-2"><span class="w-2.5 h-2.5 rounded-full bg-rose-400"></span><span class="w-2.5 h-2.5 rounded-full bg-amber-400"></span><span class="w-2.5 h-2.5 rounded-full bg-emerald-400"></span></div>
+                <div class="text-xs font-bold text-slate-700">Sejda Auto-Match Studio</div>
+                <div class="mt-1.5 text-[11px] bg-amber-100 text-slate-800 px-2 py-1 rounded font-medium">Click any PDF text to edit in-place</div>
+              </div>
+            </div>
+            <div class="p-6 flex-1 flex flex-col justify-between">
+              <div>
+                <h3 class="text-lg font-bold text-slate-900">Edit PDF like a Word Doc</h3>
+                <p class="mt-2 text-sm text-slate-600 leading-relaxed">Click directly on existing PDF text. SyntaxPDF automatically matches the font family, size, text color, and background color.</p>
+              </div>
+              <button type="button" data-quick-tool="edit" class="mt-5 self-end text-brandRed font-bold text-lg hover:translate-x-0.5 transition">↗</button>
+            </div>
+          </div>
+
+          <!-- Card 2 -->
+          <div class="rounded-3xl bg-white border border-slate-200/90 shadow-card hover:shadow-cardHover transition overflow-hidden flex flex-col">
+            <div class="h-44 bg-[#fdece9] p-6 flex items-center justify-center">
+              <div class="w-40 rounded-2xl bg-white shadow-md p-3.5 border border-slate-100 text-center">
+                <div class="text-[10px] font-bold text-slate-400">MOBILE & DESKTOP</div>
+                <div class="mt-2 text-xs font-bold text-indigo-700 bg-indigo-50 py-2 rounded-lg border border-indigo-200">List View on Mobile<br>Grid View on Laptop</div>
+              </div>
+            </div>
+            <div class="p-6 flex-1 flex flex-col justify-between">
+              <div>
+                <h3 class="text-lg font-bold text-slate-900">On-the-go with Mobile</h3>
+                <p class="mt-2 text-sm text-slate-600 leading-relaxed">Your favorite PDF tools right in your pocket with a clean mobile list view and full desktop grid layout. Work anytime, anywhere.</p>
+              </div>
+              <a href="#tools" class="mt-5 self-end text-brandRed font-bold text-lg hover:translate-x-0.5 transition">↗</a>
+            </div>
+          </div>
+
+          <!-- Card 3 -->
+          <div class="rounded-3xl bg-white border border-slate-200/90 shadow-card hover:shadow-cardHover transition overflow-hidden flex flex-col">
+            <div class="h-44 bg-[#fdece9] p-6 flex items-center justify-center">
+              <div class="w-full max-w-[240px] rounded-xl bg-slate-900 text-emerald-300 p-4 font-mono text-[11px] shadow-md">
+                <div>// Zero-Retention Security</div>
+                <div class="text-white/80 mt-1">{"auto_delete": true,</div>
+                <div class="text-white/80"> "encryption": "AES-256",</div>
+                <div class="text-white/80"> "ocr": "Tesseract Engine"}</div>
+              </div>
+            </div>
+            <div class="p-6 flex-1 flex flex-col justify-between">
+              <div>
+                <h3 class="text-lg font-bold text-slate-900">Built for Speed & Privacy</h3>
+                <p class="mt-2 text-sm text-slate-600 leading-relaxed">Client-side large file support for 5,000+ page gazettes and instant auto-deletion from server memory right after download.</p>
+              </div>
+              <button type="button" id="cardPrivacyBtn" class="mt-5 self-end text-brandRed font-bold text-lg hover:translate-x-0.5 transition">↗</button>
+            </div>
+          </div>
+        </div>
       </div>
-      <div id="upcomingGrid" class="grid grid-cols-1 md:grid-cols-3 lg:grid-cols-5 gap-2.5 md:gap-4"></div>
     </section>
 
-    <footer class="py-10 mt-6 text-center text-xs text-white/40 border-t border-white/10">
-      © <span id="year"></span> SnapPDF · Files are processed in memory and deleted immediately after download.
-    </footer>
+    <!-- ================= SECTION 3: "GET MORE WITH FREE ACCOUNT" BANNER ================= -->
+    <section class="py-6 px-4 sm:px-6 bg-white">
+      <div class="mx-auto max-w-6xl rounded-3xl bg-[#fff5c0] border border-amber-200/80 p-8 sm:p-12 flex flex-col md:flex-row items-center justify-between gap-8">
+        <div class="max-w-xl">
+          <h2 class="text-2xl sm:text-4xl font-extrabold text-[#26262e] tracking-tight">Unlock Unlimited PDF Processing</h2>
+          <p class="mt-2 text-sm text-slate-700">You can process up to <strong>3 documents without an account</strong>. Create a 100% free SyntaxPDF account to unlock unlimited access forever!</p>
+          <ul class="mt-5 space-y-2.5 text-sm sm:text-base text-slate-800">
+            <li class="flex items-center gap-2.5">
+              <span class="w-5 h-5 rounded-full bg-emerald-600 text-white grid place-items-center text-xs font-bold">✓</span>
+              <span>Process unlimited PDF documents with zero daily caps</span>
+            </li>
+            <li class="flex items-center gap-2.5">
+              <span class="w-5 h-5 rounded-full bg-emerald-600 text-white grid place-items-center text-xs font-bold">✓</span>
+              <span>Full access to Sejda-style PDF Editor, Tesseract OCR, Watermark & e-Signatures</span>
+            </li>
+            <li class="flex items-center gap-2.5">
+              <span class="w-5 h-5 rounded-full bg-emerald-600 text-white grid place-items-center text-xs font-bold">✓</span>
+              <span>100% Free forever — no credit card or subscription required</span>
+            </li>
+          </ul>
+          <button type="button" id="bannerSignupBtn" class="mt-7 inline-flex items-center gap-2 px-6 py-3 rounded-xl bg-[#f5c518] hover:bg-[#eab308] text-slate-900 font-extrabold text-sm shadow-sm transition">
+            <span>👑 Create Free Account</span>
+          </button>
+        </div>
+        <div class="w-full max-w-xs bg-white rounded-2xl p-6 shadow-lg border border-amber-300/60 text-center">
+          <span class="syntax-logo text-3xl justify-center">
+            <span class="part-synta">Synta</span><span class="part-xpdf">xPDF</span>
+          </span>
+          <p class="mt-2 text-xs text-slate-500">All 22 PDF Tools Included</p>
+          <div class="mt-4 grid grid-cols-2 gap-2 text-xs font-semibold">
+            <div class="p-2.5 rounded-xl bg-slate-50 border border-slate-200">22 Live Tools</div>
+            <div class="p-2.5 rounded-xl bg-slate-50 border border-slate-200">0 Files Stored</div>
+            <div class="p-2.5 rounded-xl bg-slate-50 border border-slate-200">AES-256 Lock</div>
+            <div class="p-2.5 rounded-xl bg-slate-50 border border-slate-200">Hi-DPI Editor</div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ================= SECTION 4: TRUSTED BY USERS & SECURITY BADGES ================= -->
+    <section class="py-16 sm:py-20 px-4 sm:px-6 bg-white text-center border-b border-slate-200">
+      <div class="mx-auto max-w-3xl">
+        <h2 class="text-2xl sm:text-4xl font-extrabold text-[#26262e] tracking-tight">The PDF software trusted by thousands of users</h2>
+        <p class="mt-4 text-slate-600 text-base sm:text-lg leading-relaxed">
+          SyntaxPDF is your number one web app for editing PDF with ease. Enjoy all the tools you need to work efficiently with your digital documents while keeping your data safe and secure.
+        </p>
+        <div class="mt-10 flex flex-wrap items-center justify-center gap-8 sm:gap-14 text-slate-500 font-bold text-xs uppercase tracking-wider">
+          <div class="flex items-center gap-2">
+            <svg class="w-6 h-6 text-slate-700" fill="none" stroke="currentColor" stroke-width="2"><use href="#i-shield"/></svg>
+            <span>ISO-Grade Privacy</span>
+          </div>
+          <div class="flex items-center gap-2">
+            <svg class="w-6 h-6 text-slate-700" fill="none" stroke="currentColor" stroke-width="2"><use href="#i-lock"/></svg>
+            <span>Secure SSL & AES-256 Encryption</span>
+          </div>
+          <div class="flex items-center gap-2">
+            <svg class="w-6 h-6 text-slate-700" fill="none" stroke="currentColor" stroke-width="2"><use href="#i-zap"/></svg>
+            <span>Instant Auto-Deletion</span>
+          </div>
+        </div>
+      </div>
+    </section>
   </main>
 
-  <!-- ================= ABOUT MODAL ================= -->
-  <div id="aboutModal" class="fixed inset-0 z-50 hidden items-center justify-center p-4 bg-black/60 backdrop-blur-sm animate-fade">
+  <!-- ================= ILOVEPDF-STYLE DARK MULTI-COLUMN FOOTER ================= -->
+  <footer class="bg-[#26262e] text-slate-300 pt-14 pb-10 px-4 sm:px-6">
+    <div class="mx-auto max-w-6xl">
+      <div class="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-8 pb-12 border-b border-white/10 text-sm">
+        <!-- Col 1 -->
+        <div>
+          <h4 class="font-bold text-white uppercase tracking-wider text-xs mb-4">Product</h4>
+          <ul class="space-y-2.5 text-slate-400">
+            <li><a href="#top" class="hover:text-white transition">Home</a></li>
+            <li><a href="#tools" class="hover:text-white transition">All 22 PDF Tools</a></li>
+            <li><button type="button" data-quick-tool="edit" class="hover:text-white transition">Sejda PDF Studio</button></li>
+            <li><button type="button" data-quick-tool="ocr" class="hover:text-white transition">Tesseract OCR PDF</button></li>
+          </ul>
+        </div>
+        <!-- Col 2 -->
+        <div>
+          <h4 class="font-bold text-white uppercase tracking-wider text-xs mb-4">Popular Tools</h4>
+          <ul class="space-y-2.5 text-slate-400">
+            <li><button type="button" data-quick-tool="merge" class="hover:text-white transition">Merge PDF</button></li>
+            <li><button type="button" data-quick-tool="split" class="hover:text-white transition">Split PDF</button></li>
+            <li><button type="button" data-quick-tool="compress" class="hover:text-white transition">Compress PDF</button></li>
+            <li><button type="button" data-quick-tool="watermark" class="hover:text-white transition">Watermark PDF</button></li>
+          </ul>
+        </div>
+        <!-- Col 3 -->
+        <div>
+          <h4 class="font-bold text-white uppercase tracking-wider text-xs mb-4">Convert</h4>
+          <ul class="space-y-2.5 text-slate-400">
+            <li><button type="button" data-quick-tool="pdf2word" class="hover:text-white transition">PDF to Word</button></li>
+            <li><button type="button" data-quick-tool="pptx2pdf" class="hover:text-white transition">PowerPoint to PDF</button></li>
+            <li><button type="button" data-quick-tool="img2pdf" class="hover:text-white transition">Image to PDF</button></li>
+            <li><button type="button" data-quick-tool="pdf2xlsx" class="hover:text-white transition">PDF to Excel</button></li>
+          </ul>
+        </div>
+        <!-- Col 4 -->
+        <div>
+          <h4 class="font-bold text-white uppercase tracking-wider text-xs mb-4">Legal & Security</h4>
+          <ul class="space-y-2.5 text-slate-400">
+            <li><button type="button" id="footerPrivacyBtn" class="hover:text-white transition">Privacy Policy (15 Points)</button></li>
+            <li><button type="button" id="footerTermsBtn" class="hover:text-white transition">Terms & Conditions (25 Points)</button></li>
+            <li><button type="button" id="aboutBtn" class="hover:text-white transition">About Developer</button></li>
+          </ul>
+        </div>
+        <!-- Col 5: Support & Ideas -->
+        <div class="col-span-2 sm:col-span-1">
+          <h4 class="font-bold text-white uppercase tracking-wider text-xs mb-4">Support & Ideas</h4>
+          <p class="text-xs text-slate-400 leading-relaxed mb-3">Have a bug report, question, or a new PDF tool idea? Email us directly:</p>
+          <div class="space-y-2 text-xs">
+            <a href="mailto:umarasifmirza439@gmail.com?subject=SyntaxPDF%20Support%20or%20New%20Idea" class="block text-amber-300 hover:underline break-all">✉ umarasifmirza439@gmail.com</a>
+            <a href="mailto:mrtach777@gmail.com?subject=SyntaxPDF%20Support%20or%20New%20Idea" class="block text-emerald-300 hover:underline break-all">✉ mrtach777@gmail.com</a>
+            <button type="button" id="footerSupportBtn" class="mt-2 inline-block px-3 py-1.5 rounded-lg bg-white/10 hover:bg-white/20 text-white font-semibold transition">Open Support Center</button>
+          </div>
+        </div>
+      </div>
+
+      <div class="pt-8 flex flex-col sm:flex-row items-center justify-between gap-4 text-xs text-slate-400">
+        <div class="flex items-center gap-3">
+          <span class="syntax-logo syntax-logo-dark text-xl">
+            <span class="part-synta">Synta</span><span class="part-xpdf">xPDF</span>
+          </span>
+          <span>· Files are processed securely and deleted immediately after download.</span>
+        </div>
+        <div>© <span id="year"></span> SyntaxPDF · Built by Muhammad Umer</div>
+      </div>
+    </div>
+  </footer>
+<!-- ================= ABOUT MODAL ================= -->
+  <div id="aboutModal" class="fixed inset-0 z-50 hidden items-center justify-center p-4 bg-black/70 backdrop-blur-sm animate-fade text-white">
     <div class="glass w-full max-w-md rounded-3xl shadow-glow p-7 text-center animate-pop relative">
       <button type="button" id="aboutClose" class="absolute top-4 right-4 grid place-items-center w-9 h-9 rounded-full hover:bg-white/10" aria-label="Close">
         <svg class="w-5 h-5" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><use href="#i-x"/></svg>
       </button>
-      <div class="mx-auto w-16 h-16 rounded-2xl bg-gradient-to-br from-violet-500 to-blue-500 grid place-items-center shadow-[0_10px_30px_rgba(139,92,246,0.5)]">
-        <svg class="w-8 h-8" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><use href="#i-logo"/></svg>
+      <div class="mx-auto inline-flex px-4 py-2 rounded-2xl bg-white/5 border border-white/10">
+        <span class="syntax-logo syntax-logo-dark text-3xl">
+          <span class="part-synta">Synta</span><span class="part-xpdf">xPDF</span>
+        </span>
       </div>
-      <h2 class="mt-5 text-2xl font-extrabold tracking-tight">About SnapPDF</h2>
-      <p class="mt-3 text-white/70 text-sm leading-relaxed text-left">
+      <h2 class="mt-4 text-2xl font-extrabold tracking-tight">About SyntaxPDF</h2>
+      <p class="mt-3 text-white/75 text-sm leading-relaxed text-left">
         Hi, I'm <strong>Muhammad Umer</strong>, an undergraduate Computer Science student based in Rahim Yar Khan, Pakistan.
       </p>
-      <p class="mt-3 text-white/70 text-sm leading-relaxed text-left">
-        I built <strong>SnapPDF</strong> with a simple goal: to provide a fast, beautiful, and 100% free toolkit for everyday PDF tasks. There are no hidden fees, no subscriptions, and most importantly, no privacy risks—your files are processed securely in memory and deleted instantly after downloading.
+      <p class="mt-3 text-white/75 text-sm leading-relaxed text-left">
+        I built <strong>SyntaxPDF</strong> with a simple goal: to provide a fast, professional, and 100% free toolkit for everyday PDF tasks. Process up to 3 documents instantly without signing in, and create a free account to unlock unlimited access forever.
       </p>
-      <div class="mt-6 p-4 rounded-2xl bg-white/5 border border-white/10 text-left">
-        <h3 class="font-semibold text-sm text-white mb-2">Built With</h3>
-        <p class="text-xs text-white/50 leading-relaxed">
-          <strong>Frontend:</strong> HTML, Tailwind CSS, Vanilla JS<br>
-          <strong>Backend:</strong> Python, Django REST Framework<br>
+      <div class="mt-5 p-4 rounded-2xl bg-white/5 border border-white/10 text-left">
+        <h3 class="font-semibold text-sm text-white mb-1.5">Built With</h3>
+        <p class="text-xs text-white/60 leading-relaxed">
+          <strong>Frontend:</strong> HTML5, Tailwind CSS, PDF.js, pdf-lib<br>
+          <strong>Backend:</strong> Python, Django, PyMuPDF, Tesseract OCR, Ghostscript<br>
           <strong>Authentication:</strong> Clerk
         </p>
       </div>
     </div>
   </div>
 
-  <!-- ================= WELCOME MODAL ================= -->
-  <div id="welcome" class="fixed inset-0 z-50 hidden items-center justify-center p-4 bg-black/60 backdrop-blur-sm animate-fade">
-    <div class="glass w-full max-w-sm rounded-3xl shadow-glow p-7 text-center animate-pop">
-      <div class="mx-auto w-16 h-16 rounded-2xl bg-gradient-to-br from-violet-500 to-blue-500 grid place-items-center shadow-[0_10px_30px_rgba(139,92,246,0.5)]">
-        <svg class="w-8 h-8" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><use href="#i-logo"/></svg>
+  <!-- ================= SUPPORT & SUBMIT NEW IDEA MODAL ================= -->
+  <div id="supportModal" class="fixed inset-0 z-50 hidden items-center justify-center p-4 bg-black/70 backdrop-blur-sm animate-fade text-white">
+    <div class="glass w-full max-w-lg rounded-3xl shadow-glow p-6 sm:p-7 animate-pop relative max-h-[90vh] overflow-y-auto">
+      <button type="button" id="supportClose" class="absolute top-4 right-4 grid place-items-center w-9 h-9 rounded-full hover:bg-white/10" aria-label="Close">
+        <svg class="w-5 h-5" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><use href="#i-x"/></svg>
+      </button>
+      <div class="flex items-center gap-3">
+        <span class="grid place-items-center w-12 h-12 rounded-2xl bg-brandRed/20 text-red-400 ring-1 ring-red-400/30 font-bold text-xl">✉</span>
+        <div>
+          <h2 class="text-xl font-extrabold tracking-tight">Support & New Feature Ideas</h2>
+          <p class="text-xs text-white/60">Have a suggestion, new PDF tool idea, or need help? Reach out directly!</p>
+        </div>
       </div>
-      <h2 class="mt-5 text-2xl font-extrabold tracking-tight">Welcome to SnapPDF</h2>
-      <p class="mt-2 text-white/60 text-sm leading-relaxed">Your all-in-one PDF toolkit. Pick a tool, drop a file, and download the result in seconds. Nothing is stored on our servers.</p>
-      <ul class="mt-4 text-left text-sm space-y-2 text-white/70">
-        <li class="flex items-center gap-2"><svg class="w-4 h-4 text-emerald-300" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><use href="#i-shield"/></svg>Files are deleted right after download</li>
-        <li class="flex items-center gap-2"><svg class="w-4 h-4 text-amber-300" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><use href="#i-zap"/></svg>13 tools, no sign-up required</li>
-      </ul>
-      <button id="welcomeClose" class="mt-6 w-full py-3 rounded-2xl bg-gradient-to-r from-violet-500 to-blue-500 font-semibold hover:brightness-110 active:scale-[.99] transition shadow-[0_10px_30px_rgba(139,92,246,0.35)]">Get Started</button>
+
+      <div class="mt-5 space-y-3 text-sm">
+        <div class="p-4 rounded-2xl bg-white/5 border border-white/10 flex items-center justify-between gap-3">
+          <div>
+            <div class="text-xs uppercase tracking-wider text-white/45 font-semibold">Primary Developer Support</div>
+            <div class="font-bold text-amber-300 mt-0.5 break-all">umarasifmirza439@gmail.com</div>
+          </div>
+          <a href="mailto:umarasifmirza439@gmail.com?subject=SyntaxPDF%20Support%20/%20New%20Idea" class="shrink-0 px-3.5 py-2 rounded-xl bg-brandRed hover:bg-[#d12823] text-white text-xs font-bold transition">Send Email</a>
+        </div>
+
+        <div class="p-4 rounded-2xl bg-white/5 border border-white/10 flex items-center justify-between gap-3">
+          <div>
+            <div class="text-xs uppercase tracking-wider text-white/45 font-semibold">Technical & Ideas Desk</div>
+            <div class="font-bold text-emerald-300 mt-0.5 break-all">mrtach777@gmail.com</div>
+          </div>
+          <a href="mailto:mrtach777@gmail.com?subject=SyntaxPDF%20New%20Idea%20/%20Feedback" class="shrink-0 px-3.5 py-2 rounded-xl bg-white/10 hover:bg-white/20 text-white text-xs font-bold transition">Send Email</a>
+        </div>
+      </div>
+
+      <form id="ideaQuickForm" class="mt-5 pt-4 border-t border-white/10 space-y-3">
+        <label class="block">
+          <span class="block text-[11px] font-semibold uppercase tracking-wider text-white/50 mb-1">Share Your New Idea or Issue</span>
+          <input type="text" id="ideaSubject" placeholder="e.g. Add PDF to Markdown converter" class="w-full rounded-xl border border-white/15 bg-white/[0.06] px-3.5 py-2.5 text-sm text-white placeholder-white/30 outline-none focus:border-red-400" required>
+        </label>
+        <label class="block">
+          <span class="block text-[11px] font-semibold uppercase tracking-wider text-white/50 mb-1">Details</span>
+          <textarea id="ideaMessage" rows="3" placeholder="Describe your idea, feedback, or bug report..." class="w-full rounded-xl border border-white/15 bg-white/[0.06] px-3.5 py-2.5 text-sm text-white placeholder-white/30 outline-none focus:border-red-400" required></textarea>
+        </label>
+        <button type="submit" class="w-full py-3 rounded-2xl bg-brandRed hover:bg-[#d12823] font-bold text-sm text-white shadow-lg transition">
+          Send Idea to Both Support Emails
+        </button>
+      </form>
     </div>
   </div>
 
-  <!-- ================= TOOL MODAL ================= -->
-  <div id="toolModal" class="fixed inset-0 z-50 hidden items-end sm:items-center justify-center bg-black/60 backdrop-blur-sm animate-fade">
-    <form id="toolForm" class="glass relative w-full sm:max-w-md rounded-t-3xl sm:rounded-3xl shadow-glow p-6 sm:p-7 max-h-[92vh] overflow-y-auto animate-pop" novalidate>
+  <!-- ================= PRIVACY POLICY MODAL (15 COMPREHENSIVE POINTS) ================= -->
+  <div id="privacyModal" class="fixed inset-0 z-50 hidden items-center justify-center p-4 bg-black/70 backdrop-blur-sm animate-fade text-white">
+    <div class="glass w-full max-w-2xl rounded-3xl shadow-glow p-6 sm:p-8 animate-pop relative max-h-[88vh] flex flex-col">
+      <button type="button" id="privacyClose" class="absolute top-4 right-4 grid place-items-center w-9 h-9 rounded-full hover:bg-white/10" aria-label="Close">
+        <svg class="w-5 h-5" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><use href="#i-x"/></svg>
+      </button>
+      <div class="flex items-center gap-3 pb-4 border-b border-white/10">
+        <svg class="w-7 h-7 text-emerald-400 shrink-0" fill="none" stroke="currentColor" stroke-width="2"><use href="#i-shield"/></svg>
+        <div>
+          <h2 class="text-xl font-extrabold tracking-tight">Privacy Policy — SyntaxPDF</h2>
+          <p class="text-xs text-white/50">15-Point Zero-Retention & Data Protection Commitment</p>
+        </div>
+      </div>
+      <div class="mt-4 overflow-y-auto pr-2 space-y-3 text-xs sm:text-sm text-white/75 leading-relaxed">
+        <p><strong>1. Zero Permanent File Storage:</strong> SyntaxPDF does not permanently store, archive, or back up any PDF, Word, Excel, PowerPoint, or image files uploaded by users.</p>
+        <p><strong>2. Automatic Post-Download Deletion:</strong> Server-processed files are placed in isolated temporary directories and are automatically and permanently wiped via <code>SelfCleaningFileResponse</code> immediately after the download stream closes.</p>
+        <p><strong>3. Client-Side Browser Processing:</strong> Operations such as Merge PDF, Split PDF, Multi-Image to PDF, and Vector Text Editing execute directly inside your browser memory using WebAssembly/JavaScript whenever possible, meaning your files never even leave your device.</p>
+        <p><strong>4. No Human Access to Documents:</strong> No developer, administrator, or third party can view, read, copy, or inspect the contents of your uploaded documents.</p>
+        <p><strong>5. Password & Encryption Confidentiality:</strong> Passwords entered in Protect PDF or Unlock PDF are never logged, echoed, or saved in plain text or hashes on our servers.</p>
+        <p><strong>6. Guest Usage Tracking (Local Storage):</strong> To provide 3 free document conversions without registration, SyntaxPDF stores a simple anonymous counter (`syntaxpdf_free_count`) in your browser's `localStorage`.</p>
+        <p><strong>7. Authentication via Clerk:</strong> When you sign up or log in after your 3 free documents, authentication is securely handled by Clerk. We only receive basic profile identifiers (such as your email address) to verify your session.</p>
+        <p><strong>8. Encrypted Data Transmission:</strong> All communications between your browser and SyntaxPDF servers are protected via HTTPS/TLS encryption.</p>
+        <p><strong>9. Sandbox Subprocess Execution:</strong> Tools utilizing Ghostscript, LibreOffice, or Tesseract OCR run in isolated, non-shell sandboxes with `-dSAFER` flags to prevent cross-file access.</p>
+        <p><strong>10. No Sale of Personal Information:</strong> We never sell, rent, trade, or monetize user emails, metadata, or document usage behavior with advertisers or data brokers.</p>
+        <p><strong>11. Minimal Error Logging:</strong> System logs only record technical error codes (such as timeouts or corrupted headers) without storing filenames or sensitive document content.</p>
+        <p><strong>12. Third-Party Service Boundaries:</strong> Aside from Clerk (for authentication) and Google TTS (when generating speech audio), no external APIs receive data from your interaction with SyntaxPDF.</p>
+        <p><strong>13. User Right to Account Deletion:</strong> Registered users can manage or delete their account profile at any time directly through the Clerk user profile button in the navigation bar.</p>
+        <p><strong>14. Children's Privacy:</strong> SyntaxPDF is a general-audience productivity utility and does not knowingly collect sensitive personal data from children under 13.</p>
+        <p><strong>15. Direct Privacy Contact:</strong> For any privacy questions, data inquiries, or security reports, contact us at <a href="mailto:umarasifmirza439@gmail.com" class="text-amber-300 underline">umarasifmirza439@gmail.com</a> or <a href="mailto:mrtach777@gmail.com" class="text-emerald-300 underline">mrtach777@gmail.com</a>.</p>
+      </div>
+    </div>
+  </div>
+
+  <!-- ================= TERMS & CONDITIONS MODAL (25 COMPREHENSIVE POINTS) ================= -->
+  <div id="termsModal" class="fixed inset-0 z-50 hidden items-center justify-center p-4 bg-black/70 backdrop-blur-sm animate-fade text-white">
+    <div class="glass w-full max-w-2xl rounded-3xl shadow-glow p-6 sm:p-8 animate-pop relative max-h-[88vh] flex flex-col">
+      <button type="button" id="termsClose" class="absolute top-4 right-4 grid place-items-center w-9 h-9 rounded-full hover:bg-white/10" aria-label="Close">
+        <svg class="w-5 h-5" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><use href="#i-x"/></svg>
+      </button>
+      <div class="flex items-center gap-3 pb-4 border-b border-white/10">
+        <svg class="w-7 h-7 text-amber-400 shrink-0" fill="none" stroke="currentColor" stroke-width="2"><use href="#i-text"/></svg>
+        <div>
+          <h2 class="text-xl font-extrabold tracking-tight">Terms & Conditions — SyntaxPDF</h2>
+          <p class="text-xs text-white/50">25-Point User Agreement & Service Terms</p>
+        </div>
+      </div>
+      <div class="mt-4 overflow-y-auto pr-2 space-y-2.5 text-xs sm:text-sm text-white/75 leading-relaxed">
+        <p><strong>1. Acceptance of Terms:</strong> By accessing or using SyntaxPDF, you agree to be bound by these 25 Terms & Conditions.</p>
+        <p><strong>2. Description of Service:</strong> SyntaxPDF provides online PDF manipulation, conversion, OCR, watermarking, signing, and visual editing tools.</p>
+        <p><strong>3. Guest Free Quota (3 Documents):</strong> Unregistered visitors may process up to three (3) documents free of charge without creating an account.</p>
+        <p><strong>4. Compulsory Account Registration After Quota:</strong> Upon completing 3 guest document tasks, users must sign up or log in via our Clerk authentication system to continue processing additional files.</p>
+        <p><strong>5. 100% Free Account Tier:</strong> Creating an account on SyntaxPDF is free and unlocks unlimited access to our PDF tools.</p>
+        <p><strong>6. User Ownership of Documents:</strong> You retain full copyright and ownership of all documents you upload and process on SyntaxPDF.</p>
+        <p><strong>7. Lawful Use Only:</strong> You agree not to use SyntaxPDF to process, forge, or distribute illegal, fraudulent, defamatory, or unauthorized copyrighted material.</p>
+        <p><strong>8. Authorization to Unlock PDFs:</strong> By using the Unlock PDF tool, you confirm that you own the document or have explicit legal permission from the owner to remove its password.</p>
+        <p><strong>9. Electronic Signatures Responsibility:</strong> Signatures applied using the Sign PDF tool are visual electronic stamps; users are responsible for verifying whether their jurisdiction requires cryptographic certificate-based digital signatures.</p>
+        <p><strong>10. True Redaction vs. Whiteout:</strong> In the Sejda Studio Editor, standard whiteout/color patches visually cover content; permanent removal of underlying data requires enabling the "True Redact" option.</p>
+        <p><strong>11. File Size & Page Limits:</strong> To protect server stability, individual uploads are subject to configured size limits (up to 200 MB) and page count thresholds.</p>
+        <p><strong>12. Prohibition of Malicious Uploads:</strong> Uploading zip bombs, decompression bombs, malware, or crafted PostScript/PDF exploits is strictly prohibited.</p>
+        <p><strong>13. Automated Scraping & Abuse:</strong> Automated bot requests, DDoS attacks, or bypassing the 3-document guest gate via scripted abuse will result in IP blocking.</p>
+        <p><strong>14. OCR & Conversion Accuracy:</strong> While Tesseract OCR, LibreOffice, and pdf2docx aim for high accuracy, formatting and text recognition depend on source scan quality and are provided without a guarantee of 100% perfection.</p>
+        <p><strong>15. Font & Color Auto-Matching:</strong> Our Sejda-style editor approximates fonts using standard PDF families (Sans, Serif, Mono) and canvas pixel sampling; slight visual variations may occur across PDF viewers.</p>
+        <p><strong>16. Ephemeral File Availability:</strong> Because files are deleted immediately upon download, SyntaxPDF cannot recover lost documents once you close your browser tab.</p>
+        <p><strong>17. User Duty to Back Up Originals:</strong> You are solely responsible for keeping backup copies of your original files before cropping, splitting, redacting, or compressing them.</p>
+        <p><strong>18. Service Availability ("As-Is"):</strong> SyntaxPDF is provided on an "AS IS" and "AS AVAILABLE" basis without warranties of uninterrupted uptime.</p>
+        <p><strong>19. Limitation of Liability:</strong> SyntaxPDF and its developer (Muhammad Umer) shall not be liable for any direct or indirect data loss, business interruption, or damages arising from use of the tools.</p>
+        <p><strong>20. Intellectual Property of SyntaxPDF:</strong> The SyntaxPDF name, logo, UI design, and custom source code remain the intellectual property of SyntaxPDF.</p>
+        <p><strong>21. User Ideas & Feedback Submissions:</strong> Any feature ideas or suggestions emailed to `umarasifmirza439@gmail.com` or `mrtach777@gmail.com` may be implemented into SyntaxPDF without royalty obligations.</p>
+        <p><strong>22. Account Suspension:</strong> We reserve the right to suspend accounts that violate security rules or attempt to compromise server infrastructure.</p>
+        <p><strong>23. Third-Party Libraries:</strong> SyntaxPDF integrates open-source technologies including PDF.js, pdf-lib, PyMuPDF, Ghostscript, and Tesseract under their respective licenses.</p>
+        <p><strong>24. Modifications to Terms:</strong> We may update these Terms periodically; continued use of SyntaxPDF constitutes acceptance of any updated terms.</p>
+        <p><strong>25. Governing Law & Contact:</strong> These Terms are governed by the laws of Pakistan. For legal or support inquiries, email <a href="mailto:umarasifmirza439@gmail.com" class="text-amber-300 underline">umarasifmirza439@gmail.com</a> or <a href="mailto:mrtach777@gmail.com" class="text-emerald-300 underline">mrtach777@gmail.com</a>.</p>
+      </div>
+    </div>
+  </div>
+
+  <!-- ================= UNIFIED TOOL MODAL (VISUAL SPLIT, CROP, SPEECH, WATERMARK & SIGN PAD) ================= -->
+  <div id="toolModal" class="fixed inset-0 z-50 hidden items-end sm:items-center justify-center bg-black/70 backdrop-blur-sm animate-fade text-white">
+    <form id="toolForm" class="glass relative w-full sm:max-w-lg rounded-t-3xl sm:rounded-3xl shadow-glow p-6 sm:p-7 max-h-[92vh] overflow-y-auto animate-pop" novalidate>
       <button type="button" id="modalClose" class="absolute top-4 right-4 grid place-items-center w-9 h-9 rounded-full hover:bg-white/10" aria-label="Close">
         <svg class="w-5 h-5" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><use href="#i-x"/></svg>
       </button>
       <div class="flex items-center gap-3">
         <span id="mIcon" class="icon grid place-items-center w-12 h-12 rounded-2xl p-3"></span>
         <div>
-          <h3 id="mTitle" class="text-lg font-bold"></h3>
-          <p id="mDesc" class="text-sm text-white/50"></p>
+          <h3 id="mTitle" class="text-lg font-bold text-white"></h3>
+          <p id="mDesc" class="text-sm text-white/55"></p>
         </div>
       </div>
 
-      <label id="dropzone" class="mt-5 block cursor-pointer rounded-2xl border border-dashed border-white/25 bg-white/[0.04] hover:bg-white/[0.08] hover:border-white/40 transition p-5 text-center">
+      <label id="dropzone" class="mt-5 block cursor-pointer rounded-2xl border border-dashed border-white/25 bg-white/[0.04] hover:bg-white/[0.08] hover:border-red-400/60 transition p-5 text-center">
         <input type="file" id="mFile" class="sr-only">
-        <svg class="mx-auto w-7 h-7 text-white/50" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><use href="#i-upload"/></svg>
-        <p class="mt-2 text-sm font-medium">Tap to choose or drop a file</p>
-        <p id="mHint" class="text-xs text-white/40 mt-0.5"></p>
+        <svg class="mx-auto w-8 h-8 text-red-400" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><use href="#i-upload"/></svg>
+        <p class="mt-2 text-sm font-semibold text-white">Tap to choose or drop file here</p>
+        <p id="mHint" class="text-xs text-white/45 mt-0.5"></p>
         <ul id="mFiles" class="mt-2 text-left text-xs space-y-1"></ul>
       </label>
 
+      <!-- Interactive Split PDF Thumbnail Selector -->
+      <div id="mSplitPreview" class="hidden mt-4 p-3 rounded-2xl bg-white/[0.03] border border-white/10">
+        <div class="flex items-center justify-between text-xs text-white/60 mb-2">
+          <span id="mSplitCount">Click pages to extract</span>
+          <button type="button" id="mSplitSelectAll" class="text-red-400 hover:underline font-semibold">Select all / Clear</button>
+        </div>
+        <div id="mSplitGrid" class="grid grid-cols-3 sm:grid-cols-4 gap-2 max-h-48 overflow-y-auto p-1"></div>
+      </div>
+
+      <!-- Interactive Visual Crop PDF Canvas -->
+      <div id="mCropPreview" class="hidden mt-4 p-3 rounded-2xl bg-white/[0.03] border border-white/10">
+        <div class="flex items-center justify-between text-xs text-white/60 mb-2">
+          <span>Drag corners to crop visually</span>
+          <div class="flex items-center gap-1.5">
+            <button type="button" id="cropPrevPage" class="px-2 py-0.5 rounded bg-white/10 hover:bg-white/20">‹</button>
+            <span id="cropPageIndicator">Page 1</span>
+            <button type="button" id="cropNextPage" class="px-2 py-0.5 rounded bg-white/10 hover:bg-white/20">›</button>
+          </div>
+        </div>
+        <div class="relative mx-auto overflow-hidden rounded-lg select-none w-fit border border-white/15" id="cropCanvasWrap">
+          <canvas id="cropCanvas" class="block max-w-full h-auto"></canvas>
+          <div id="cropBox" class="absolute border-2 border-red-400 bg-red-500/15 cursor-move" style="left:10%;top:10%;right:10%;bottom:10%;box-shadow:0 0 0 9999px rgba(0,0,0,0.55);">
+            <span data-dir="nw" class="crop-h absolute -top-1.5 -left-1.5 w-3.5 h-3.5 bg-white border-2 border-red-600 rounded-full cursor-nwse-resize"></span>
+            <span data-dir="ne" class="crop-h absolute -top-1.5 -right-1.5 w-3.5 h-3.5 bg-white border-2 border-red-600 rounded-full cursor-nesw-resize"></span>
+            <span data-dir="sw" class="crop-h absolute -bottom-1.5 -left-1.5 w-3.5 h-3.5 bg-white border-2 border-red-600 rounded-full cursor-nesw-resize"></span>
+            <span data-dir="se" class="crop-h absolute -bottom-1.5 -right-1.5 w-3.5 h-3.5 bg-white border-2 border-red-600 rounded-full cursor-nwse-resize"></span>
+          </div>
+        </div>
+      </div>
+
+      <!-- Live Speech Audio Player -->
+      <div id="mSpeechPlayer" class="hidden mt-4 p-3 rounded-2xl bg-red-500/10 border border-red-400/20">
+        <div class="flex items-center justify-between text-xs text-red-200 mb-2">
+          <span>Instant Browser Reader (No wait)</span>
+          <div class="flex gap-1.5">
+            <button type="button" id="ttsPlayBtn" class="px-2.5 py-1 rounded-lg bg-brandRed text-white font-semibold hover:bg-[#d12823]">▶ Read Aloud</button>
+            <button type="button" id="ttsStopBtn" class="px-2.5 py-1 rounded-lg bg-white/10 hover:bg-white/20">■ Stop</button>
+          </div>
+        </div>
+        <p id="ttsPreviewText" class="text-[11px] text-white/60 max-h-20 overflow-y-auto leading-relaxed"></p>
+      </div>
+
+      <!-- Live Signature Drawing Pad (For Sign PDF Tool) -->
+      <div id="mSignPadWrap" class="hidden mt-4 p-3 rounded-2xl bg-white/[0.03] border border-white/10">
+        <div class="flex items-center justify-between text-xs text-white/60 mb-2">
+          <span>Draw your signature below</span>
+          <button type="button" id="signClearBtn" class="text-rose-300 hover:underline font-semibold">Clear Pad</button>
+        </div>
+        <canvas id="signPadCanvas" width="420" height="140" class="w-full h-32 bg-white rounded-xl cursor-crosshair touch-none"></canvas>
+      </div>
+
       <div id="mFields" class="mt-4 space-y-3"></div>
 
-      <button type="submit" id="mSubmit" class="mt-5 w-full py-3 rounded-2xl bg-gradient-to-r from-violet-500 to-blue-500 font-semibold hover:brightness-110 disabled:opacity-60 disabled:cursor-progress flex items-center justify-center gap-2 transition shadow-[0_10px_30px_rgba(139,92,246,0.3)]">
+      <button type="submit" id="mSubmit" class="mt-5 w-full py-3.5 rounded-2xl bg-brandRed hover:bg-[#d12823] text-white font-bold disabled:opacity-60 disabled:cursor-progress flex items-center justify-center gap-2 transition shadow-[0_10px_25px_rgba(229,50,45,0.35)]">
         <span id="mBtnLabel">Process</span>
         <span id="mSpinner" class="hidden w-4 h-4 rounded-full border-2 border-white/40 border-t-white animate-spin"></span>
       </button>
       <div id="mBar" class="hidden mt-3 h-1 rounded-full bg-white/10 overflow-hidden"><div class="h-full w-2/5 bg-gradient-to-r from-transparent via-white to-transparent animate-slide"></div></div>
-      <p id="mStatus" class="mt-3 min-h-[1.25rem] text-center text-sm text-white/50" role="status" aria-live="polite"></p>
+      <p id="mStatus" class="mt-3 min-h-[1.25rem] text-center text-sm text-white/60" role="status" aria-live="polite"></p>
     </form>
   </div>
 
-  <!-- ================= AUTH GATE (sign up / log in required) ================= -->
-  <div id="clerk-auth-modal" role="dialog" aria-modal="true" aria-label="Sign up or log in to SnapPDF">
-    <div id="clerk-auth-content">
-      <div class="flex items-center gap-2.5 text-lg font-extrabold tracking-tight">
-        <span class="grid place-items-center w-9 h-9 rounded-xl bg-gradient-to-br from-violet-500 to-blue-500 shadow-[0_6px_20px_rgba(139,92,246,0.5)]">
-          <svg class="w-5 h-5" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><use href="#i-logo"/></svg>
+  <!-- ================= SEJDA-STYLE FULL-SCREEN PDF EDITOR STUDIO ================= -->
+  <div id="sejdaModal" class="fixed inset-0 z-50 hidden flex-col bg-[#07060d] text-white animate-fade">
+    <div class="glass border-b border-white/10 px-3 sm:px-6 py-2.5 flex flex-wrap items-center justify-between gap-2 z-20">
+      <div class="flex items-center gap-2.5">
+        <span class="syntax-logo syntax-logo-dark text-xl">
+          <span class="part-synta">Synta</span><span class="part-xpdf">xPDF</span>
         </span>
-        SnapPDF
+        <span class="text-[10px] font-bold px-2 py-0.5 rounded-full bg-brandRed/20 text-red-300 border border-red-400/30">Sejda Auto-Match Studio</span>
+        <p id="sejdaFileInfo" class="hidden sm:block text-[11px] text-white/50 ml-2">Click any existing text on the PDF — font & colors match automatically</p>
       </div>
-      <div id="clerk-auth-tabs" class="is-hidden glass rounded-full p-1 grid grid-cols-2 w-full max-w-[22rem] text-sm font-semibold" role="tablist">
+
+      <!-- Formatting Controls -->
+      <div class="flex flex-wrap items-center gap-1.5 bg-white/[0.04] p-1 rounded-2xl border border-white/10">
+        <button type="button" data-sejda-tool="editText" class="sejda-tool-btn px-3 py-1.5 rounded-xl text-xs font-semibold bg-brandRed text-white transition">
+          T · Edit / Add Text
+        </button>
+        <button type="button" data-sejda-tool="whiteout" class="sejda-tool-btn px-3 py-1.5 rounded-xl text-xs font-semibold text-white/70 hover:bg-white/10 transition">
+          ▭ · Smart Eraser
+        </button>
+
+        <span class="h-4 w-px bg-white/15 mx-1"></span>
+
+        <select id="sejdaFontFamily" class="rounded-lg bg-white/10 border border-white/15 px-2 py-1 text-xs text-white">
+          <option value="sans">Sans (Helvetica / Arial)</option>
+          <option value="serif">Serif (Times New Roman)</option>
+          <option value="mono">Mono (Courier)</option>
+        </select>
+
+        <label class="flex items-center gap-1 text-xs text-white/70 px-1.5">
+          <span>Size</span>
+          <input type="number" id="sejdaFontSize" value="14" min="6" max="96" class="w-12 rounded-lg bg-white/10 border border-white/15 px-1.5 py-1 text-center text-xs text-white">
+        </label>
+
+        <button type="button" id="sejdaBoldBtn" class="px-2.5 py-1 rounded-lg text-xs font-extrabold border border-white/15 bg-white/5 hover:bg-white/15">B</button>
+
+        <select id="sejdaAlign" class="rounded-lg bg-white/10 border border-white/15 px-2 py-1 text-xs text-white">
+          <option value="left">Left</option>
+          <option value="center">Center</option>
+          <option value="right">Right</option>
+        </select>
+
+        <label class="flex items-center gap-1 text-xs text-white/70 px-1">
+          <input type="color" id="sejdaColor" value="#000000" class="w-6 h-6 rounded cursor-pointer bg-transparent border-0">
+        </label>
+
+        <label class="flex items-center gap-1 text-[11px] text-white/60 px-1.5 cursor-pointer">
+          <input type="checkbox" id="sejdaRedact" class="rounded accent-brandRed">
+          <span>True Redact</span>
+        </label>
+
+        <button type="button" id="sejdaUndoBtn" class="p-1.5 rounded-lg text-white/70 hover:bg-white/10 hover:text-white" title="Undo">
+          <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2"><use href="#i-undo"/></svg>
+        </button>
+        <button type="button" id="sejdaDeleteBtn" class="p-1.5 rounded-lg text-rose-300 hover:bg-rose-500/20" title="Delete selected box">
+          <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2"><use href="#i-trash"/></svg>
+        </button>
+      </div>
+
+      <!-- Actions -->
+      <div class="flex items-center gap-2">
+        <label class="cursor-pointer px-3 py-1.5 rounded-xl border border-white/15 bg-white/5 hover:bg-white/10 text-xs font-medium">
+          Change PDF
+          <input type="file" id="sejdaFileInput" accept="application/pdf,.pdf" class="sr-only">
+        </label>
+        <button type="button" id="sejdaApplyBtn" class="px-4 py-1.5 rounded-xl bg-brandRed hover:bg-[#d12823] text-xs font-bold text-white shadow-lg transition">
+          Apply Changes & Download
+        </button>
+        <button type="button" id="sejdaCloseBtn" class="grid place-items-center w-8 h-8 rounded-full hover:bg-white/10" aria-label="Close Editor">
+          <svg class="w-5 h-5" fill="none" stroke="currentColor" stroke-width="2"><use href="#i-x"/></svg>
+        </button>
+      </div>
+    </div>
+
+    <div id="sejdaStatusBar" class="bg-red-950/60 border-b border-red-500/20 px-4 py-1 text-center text-xs text-red-200">
+      Tip: Click any line on the PDF — font family, text color & page background color will match automatically!
+    </div>
+
+    <div id="sejdaWorkspace" class="flex-1 overflow-y-auto p-4 sm:p-8 flex flex-col items-center gap-6 bg-[#0b0a14]">
+      <label id="sejdaEmptyState" class="my-auto cursor-pointer glass rounded-3xl p-10 max-w-md w-full text-center border-2 border-dashed border-white/20 hover:border-red-400/60 transition">
+        <svg class="mx-auto w-12 h-12 text-red-400" fill="none" stroke="currentColor" stroke-width="1.8"><use href="#i-upload"/></svg>
+        <h4 class="mt-4 text-lg font-bold">Drop a PDF to start editing</h4>
+        <p class="mt-1 text-xs text-white/50">Click existing text to edit it in-place with automatic font, text color & background color matching.</p>
+        <span class="mt-5 inline-block px-5 py-2.5 rounded-xl bg-brandRed text-xs font-bold text-white">Choose PDF File</span>
+      </label>
+      <div id="sejdaPagesContainer" class="flex flex-col items-center gap-6 w-full"></div>
+    </div>
+  </div>
+
+  <!-- ================= CLERK AUTH GATE MODAL (COMPULSORY AFTER 3 FREE DOCS) ================= -->
+  <div id="clerk-auth-modal" hidden role="dialog" aria-modal="true" aria-label="Sign up or log in to SyntaxPDF">
+    <div id="clerk-auth-content" class="relative text-white">
+      <button type="button" id="clerkCloseBtn" class="absolute top-4 right-4 grid place-items-center w-8 h-8 rounded-full hover:bg-white/10 text-white/70" aria-label="Close">
+        <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2"><use href="#i-x"/></svg>
+      </button>
+
+      <span class="syntax-logo syntax-logo-dark text-3xl">
+        <span class="part-synta">Synta</span><span class="part-xpdf">xPDF</span>
+      </span>
+
+      <p id="clerkGateReason" class="text-xs text-center text-amber-300 bg-amber-500/10 border border-amber-400/20 px-3.5 py-2 rounded-xl">
+        Sign up or log in for free to unlock unlimited PDF processing!
+      </p>
+
+      <div id="clerk-auth-tabs" class="is-hidden bg-white/10 rounded-full p-1 grid grid-cols-2 w-full max-w-[20rem] text-xs font-bold" role="tablist">
         <button type="button" role="tab" data-auth-tab="signUp" aria-selected="true">Sign up</button>
         <button type="button" role="tab" data-auth-tab="signIn" aria-selected="false">Log in</button>
       </div>
-      <p id="clerk-auth-status" class="text-sm text-white/60" role="status" aria-live="polite">Loading&hellip;</p>
-      <button id="clerk-auth-retry" type="button" class="is-hidden px-4 py-2 rounded-full border border-white/20 bg-white/10 text-sm font-semibold hover:bg-white/20 transition">Try again</button>
-      
+
+      <p id="clerk-auth-status" class="text-xs text-white/60" role="status" aria-live="polite">Loading authentication&hellip;</p>
+      <button id="clerk-auth-retry" type="button" class="is-hidden px-4 py-2 rounded-full border border-white/20 bg-white/10 text-xs font-semibold hover:bg-white/20 transition">Try again</button>
+
       <div id="clerk-signup-mount" class="w-full flex justify-center"></div>
       <div id="clerk-signin-mount" class="w-full flex justify-center" style="display: none;"></div>
     </div>
   </div>
 
+<!-- ================= PART 3: AUTH, 3-DOC QUOTA & 22 TOOLS UI CONTROLLER ================= -->
   <script>
+    // Configure PDF.js worker
+    if (window.pdfjsLib) {
+      window.pdfjsLib.GlobalWorkerOptions.workerSrc =
+        "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js";
+    }
+
+    const API_BASE = (location.port === "5500" || location.protocol === "file:")
+      ? "http://127.0.0.1:8000/"
+      : "/";
+
+    // Global state for 3-Document Guest Quota & Clerk Auth
+    const FREE_DOC_LIMIT = 3;
+    const QUOTA_KEY = "syntaxpdf_free_docs_used";
+
+    window.SyntaxAuth = {
+      isSignedIn: false,
+      openAuthModal: null,
+      getUsedCount() {
+        const val = parseInt(localStorage.getItem(QUOTA_KEY) || "0", 10);
+        return Number.isFinite(val) && val >= 0 ? val : 0;
+      },
+      getRemaining() {
+        return Math.max(0, FREE_DOC_LIMIT - this.getUsedCount());
+      },
+      canProcess() {
+        if (this.isSignedIn || (window.Clerk && window.Clerk.user)) return true;
+        return this.getUsedCount() < FREE_DOC_LIMIT;
+      },
+      recordSuccess() {
+        if (this.isSignedIn || (window.Clerk && window.Clerk.user)) return;
+        const next = this.getUsedCount() + 1;
+        localStorage.setItem(QUOTA_KEY, String(next));
+        this.updateQuotaUI();
+      },
+      requireAuthIfQuotaReached(reasonText) {
+        if (this.canProcess()) return false;
+        if (this.openAuthModal) {
+          this.openAuthModal(
+            "signUp",
+            reasonText || "You have used your 3 free guest documents. Create a 100% free SyntaxPDF account to continue processing unlimited files!"
+          );
+        }
+        return true;
+      },
+      updateQuotaUI() {
+        const badge = document.getElementById("freeUsageBadge");
+        const txt = document.getElementById("freeUsageText");
+        const mobTxt = document.getElementById("mobileFreeUsageText");
+        const guestNav = document.getElementById("navGuestActions");
+        const signedIn = this.isSignedIn || Boolean(window.Clerk && window.Clerk.user);
+
+        if (signedIn) {
+          if (guestNav) guestNav.classList.add("hidden");
+          if (badge) {
+            badge.className = "hidden sm:inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-semibold bg-emerald-50 text-emerald-800 border border-emerald-200";
+          }
+          if (txt) txt.textContent = "Unlimited Account Active";
+          if (mobTxt) mobTxt.textContent = "Unlimited (Signed In)";
+        } else {
+          if (guestNav) guestNav.classList.remove("hidden");
+          const rem = this.getRemaining();
+          if (txt) txt.textContent = rem > 0 ? `${rem}/${FREE_DOC_LIMIT} Free Docs Left` : "0/3 Free Left · Sign Up Required";
+          if (mobTxt) mobTxt.textContent = rem > 0 ? `${rem}/${FREE_DOC_LIMIT} Free Docs Left` : "Sign Up Required";
+        }
+      }
+    };
+
+    // Clerk Auth Initialization & Modal Controller
     (function () {
-      const root = document.documentElement;
       const gate = document.getElementById("clerk-auth-modal");
+      const closeBtn = document.getElementById("clerkCloseBtn");
+      const reasonEl = document.getElementById("clerkGateReason");
       const signUpMount = document.getElementById("clerk-signup-mount");
       const signInMount = document.getElementById("clerk-signin-mount");
       const tabsBox = document.getElementById("clerk-auth-tabs");
@@ -348,35 +966,30 @@
       const HERE = location.href.split("#")[0];
 
       let mode = "signUp";
-      let revealed = false;
       let listening = false;
       let clerkReady = null;
 
-      // Master Dark Theme config for all Clerk UI elements
       const clerkDarkTheme = {
         variables: {
-          colorPrimary: '#8b5cf6',
-          colorBackground: '#07060d', 
-          colorText: '#ffffff',
-          colorInputBackground: 'rgba(255,255,255,0.06)',
-          colorInputText: '#ffffff',
-          colorTextSecondary: 'rgba(255,255,255,0.6)',
-          colorDanger: '#f87171',
-          borderRadius: '1rem',
+          colorPrimary: "#e5322d",
+          colorBackground: "#0d0c16",
+          colorText: "#ffffff",
+          colorInputBackground: "rgba(255,255,255,0.06)",
+          colorInputText: "#ffffff",
+          colorTextSecondary: "rgba(255,255,255,0.6)",
+          colorDanger: "#f87171",
+          borderRadius: "0.85rem",
         },
-        elements: { 
+        elements: {
           footerAction: { display: "none" },
-          card: { boxShadow: 'none', background: 'transparent' },
-          socialButtonsBlockButton: { backgroundColor: 'rgba(255,255,255,0.05)', borderColor: 'rgba(255,255,255,0.1)', color: '#fff' },
-          dividerLine: { backgroundColor: 'rgba(255,255,255,0.1)' },
-          formFieldInput: { borderColor: 'rgba(255,255,255,0.15)' },
-          formButtonPrimary: { backgroundImage: 'linear-gradient(to right, #8b5cf6, #3b82f6)', border: 'none' },
-          userButtonPopoverCard: { background: '#07060d', border: '1px solid rgba(255,255,255,0.1)' },
-          userButtonPopoverActionButton: { '&:hover': { background: 'rgba(255,255,255,0.05)' } },
-        } 
+          card: { boxShadow: "none", background: "transparent" },
+          socialButtonsBlockButton: { backgroundColor: "rgba(255,255,255,0.06)", borderColor: "rgba(255,255,255,0.12)", color: "#fff" },
+          dividerLine: { backgroundColor: "rgba(255,255,255,0.12)" },
+          formFieldInput: { borderColor: "rgba(255,255,255,0.15)" },
+          formButtonPrimary: { backgroundColor: "#e5322d", border: "none" },
+          userButtonPopoverCard: { background: "#0d0c16", border: "1px solid rgba(255,255,255,0.12)" },
+        }
       };
-
-      document.body.classList.add("no-scroll");
 
       function setStatus(msg, retry) {
         status.textContent = msg || "";
@@ -388,9 +1001,7 @@
         if (!clerkReady) {
           clerkReady = (async () => {
             if (!window.Clerk) throw new Error("Clerk script did not load.");
-            await window.Clerk.load({
-              afterSignOutUrl: HERE
-            });
+            await window.Clerk.load({ afterSignOutUrl: HERE });
           })();
           clerkReady.catch(() => { clerkReady = null; });
         }
@@ -401,97 +1012,126 @@
         tabsBox.classList.remove("is-hidden");
         setStatus("");
         tabs.forEach((t) => t.setAttribute("aria-selected", String(t.dataset.authTab === mode)));
-        
+
         const props = {
           routing: "virtual",
           signInUrl: HERE,
           signUpUrl: HERE,
           fallbackRedirectUrl: HERE,
-          appearance: clerkDarkTheme
+          appearance: clerkDarkTheme,
         };
-        
+
         if (mode === "signUp") {
           signInMount.style.display = "none";
           signUpMount.style.display = "flex";
-          if (signUpMount.childElementCount === 0) {
+          if (signUpMount.childElementCount === 0 && window.Clerk) {
             Clerk.mountSignUp(signUpMount, props);
           }
         } else {
           signUpMount.style.display = "none";
           signInMount.style.display = "flex";
-          if (signInMount.childElementCount === 0) {
+          if (signInMount.childElementCount === 0 && window.Clerk) {
             Clerk.mountSignIn(signInMount, props);
           }
         }
       }
 
-      function reveal() {
-        if (revealed) return;
-        revealed = true;
-        gate.hidden = true;
-        root.classList.remove("auth-pending");
-        document.body.classList.remove("no-scroll");
-        
-        document.querySelectorAll("[data-clerk-user-button]").forEach((el) => {
-          Clerk.mountUserButton(el, { appearance: clerkDarkTheme });
-        });
-        
-        document.querySelectorAll(".js-start-free").forEach((a) => {
-          a.textContent = "Open tools";
-          a.setAttribute("href", "#tools");
-        });
+      function syncSignedInState() {
+        const hasUser = Boolean(window.Clerk && window.Clerk.user);
+        window.SyntaxAuth.isSignedIn = hasUser;
+        window.SyntaxAuth.updateQuotaUI();
+        if (hasUser) {
+          gate.hidden = true;
+          document.body.classList.remove("no-scroll");
+          document.querySelectorAll("[data-clerk-user-button]").forEach((el) => {
+            if (el.childElementCount === 0) {
+              Clerk.mountUserButton(el, { appearance: clerkDarkTheme });
+            }
+          });
+        }
       }
 
-      async function boot() {
-        setStatus("Loading\u2026", false);
+      window.SyntaxAuth.openAuthModal = async (targetMode = "signUp", customReason = "") => {
+        mode = targetMode;
+        if (customReason && reasonEl) reasonEl.textContent = customReason;
+        gate.hidden = false;
+        document.body.classList.add("no-scroll");
         try {
           await initClerk();
           if (Clerk.user) {
-            reveal();
-          } else {
-            renderAuth();
+            syncSignedInState();
+            return;
           }
-          if (!listening) {
-            listening = true;
-            Clerk.addListener(({ user }) => {
-              if (user) reveal();
-              else if (revealed) location.reload();
-            });
-          }
+          renderAuth();
         } catch (err) {
           console.error("[Clerk]", err);
           setStatus("Couldn't load sign-in. Check your connection and try again.", true);
         }
-      }
+      };
+
+      closeBtn.addEventListener("click", () => {
+        gate.hidden = true;
+        document.body.classList.remove("no-scroll");
+      });
 
       tabs.forEach((t) => t.addEventListener("click", () => {
         mode = t.dataset.authTab;
-        if (window.Clerk && !revealed) renderAuth();
+        if (window.Clerk) renderAuth();
       }));
-      retryBtn.addEventListener("click", boot);
+      retryBtn.addEventListener("click", () => window.SyntaxAuth.openAuthModal(mode));
 
-      window.addEventListener("load", boot);
+      document.getElementById("navLoginBtn")?.addEventListener("click", () =>
+        window.SyntaxAuth.openAuthModal("signIn", "Log in to your SyntaxPDF account for unlimited access.")
+      );
+      document.getElementById("navSignupBtn")?.addEventListener("click", () =>
+        window.SyntaxAuth.openAuthModal("signUp", "Create your free SyntaxPDF account to process unlimited PDFs.")
+      );
+      document.getElementById("bannerSignupBtn")?.addEventListener("click", () =>
+        window.SyntaxAuth.openAuthModal("signUp", "Create your free SyntaxPDF account to unlock unlimited PDF tools!")
+      );
+
+      window.addEventListener("load", async () => {
+        window.SyntaxAuth.updateQuotaUI();
+        try {
+          await initClerk();
+          syncSignedInState();
+          if (!listening) {
+            listening = true;
+            Clerk.addListener(({ user }) => {
+              syncSignedInState();
+            });
+          }
+        } catch (e) {
+          console.warn("Clerk background init:", e);
+        }
+      });
     })();
-  </script>
 
-  <!-- ================= TOOLS JAVASCRIPT ================= -->
-  <script>
-    const API_BASE = "http://127.0.0.1:8000/";
+    async function authHeaders() {
+      try {
+        if (window.Clerk && window.Clerk.session) {
+          const token = await window.Clerk.session.getToken();
+          if (token) return { Authorization: `Bearer ${token}` };
+        }
+      } catch (_) {}
+      return {};
+    }
 
+    // iLovePDF Icon Badge Color Themes
     const THEMES = {
-      red:     "bg-red-500/15 text-red-300 ring-1 ring-red-400/30",
-      orange:  "bg-orange-500/15 text-orange-300 ring-1 ring-orange-400/30",
-      amber:   "bg-amber-500/15 text-amber-300 ring-1 ring-amber-400/30",
-      teal:    "bg-teal-500/15 text-teal-300 ring-1 ring-teal-400/30",
-      emerald: "bg-emerald-500/15 text-emerald-300 ring-1 ring-emerald-400/30",
-      pink:    "bg-pink-500/15 text-pink-300 ring-1 ring-pink-400/30",
-      blue:    "bg-blue-500/15 text-blue-300 ring-1 ring-blue-400/30",
-      green:   "bg-green-500/15 text-green-300 ring-1 ring-green-400/30",
-      slate:   "bg-slate-400/15 text-slate-200 ring-1 ring-slate-300/30",
-      violet:  "bg-violet-500/15 text-violet-300 ring-1 ring-violet-400/30",
-      lime:    "bg-lime-500/15 text-lime-300 ring-1 ring-lime-400/30",
-      fuchsia: "bg-fuchsia-500/15 text-fuchsia-300 ring-1 ring-fuchsia-400/30",
-      indigo:  "bg-indigo-500/15 text-indigo-300 ring-1 ring-indigo-400/30",
+      red:     "bg-[#ffe8e6] text-[#e5322d]",
+      orange:  "bg-[#fff0e5] text-[#f26924]",
+      amber:   "bg-[#fff6db] text-[#d97706]",
+      teal:    "bg-[#e3f8f6] text-[#0d9488]",
+      emerald: "bg-[#e6f9ed] text-[#16a34a]",
+      pink:    "bg-[#fce8f3] text-[#db2777]",
+      blue:    "bg-[#e8f0fe] text-[#2563eb]",
+      green:   "bg-[#e6f7ec] text-[#15803d]",
+      slate:   "bg-[#f1f5f9] text-[#475569]",
+      violet:  "bg-[#f3e8ff] text-[#7c3aed]",
+      lime:    "bg-[#ecfccb] text-[#4d7c0f]",
+      fuchsia: "bg-[#fae8ff] text-[#c026d3]",
+      indigo:  "bg-[#e0e7ff] text-[#4f46e5]",
     };
 
     const PDF = "application/pdf,.pdf";
@@ -499,136 +1139,275 @@
     const DPIS = [["100", "100 DPI · small"], ["150", "150 DPI · balanced", true], ["200", "200 DPI · sharp"], ["300", "300 DPI · print"]];
     const LANGS = [["en", "English", true], ["ur", "Urdu"], ["es", "Spanish"], ["fr", "French"], ["de", "German"], ["ar", "Arabic"], ["hi", "Hindi"]];
 
+    // ALL 22 LIVE TOOLS (Categorized for iLovePDF Filter Pills)
     const TOOLS = [
-      { id: "merge",    name: "Merge PDF",     desc: "Combine PDFs into one",  color: "red",     icon: "merge",    endpoint: "merge/",         accept: PDF, multiple: true, minFiles: 2, field: "files", fallback: "merged.pdf", hint: "Select 2 or more PDFs", btn: "Merge PDFs" },
-      { id: "split",    name: "Split PDF",     desc: "Extract chosen pages",   color: "orange",  icon: "split",    endpoint: "split-pdf/",     accept: PDF, fallback: "split.pdf", btn: "Extract pages",
-        fields: [{ name: "pages", label: "Pages", type: "text", placeholder: "e.g. 1,3,5-7", required: true }] },
-      { id: "protect",  name: "Protect PDF",   desc: "Add a password",         color: "amber",   icon: "lock",     endpoint: "protect-pdf/",   accept: PDF, fallback: "protected.pdf", btn: "Protect PDF",
-        fields: [{ name: "password", label: "Password", type: "password", placeholder: "Choose a strong password", required: true, autocomplete: "new-password" }] },
-      { id: "unlock",   name: "Unlock PDF",    desc: "Remove a password",      color: "teal",    icon: "unlock",   endpoint: "unlock-pdf/",    accept: PDF, fallback: "unlocked.pdf", btn: "Unlock PDF",
-        fields: [{ name: "password", label: "Current password", type: "password", placeholder: "Enter the PDF password", required: true }] },
-      { id: "compress", name: "Compress PDF",  desc: "Reduce file size",       color: "emerald", icon: "compress", endpoint: "compress-pdf/",  accept: PDF, fallback: "compressed.pdf", btn: "Compress PDF",
+      { id: "merge",     cat: "organize", name: "Merge PDF",         desc: "Combine PDFs in the order you want with the easiest PDF merger available.", color: "red",     icon: "merge",    endpoint: "merge/",             accept: PDF, multiple: true, minFiles: 2, field: "files", fallback: "merged.pdf", hint: "Select 2 or more PDFs", btn: "Merge PDFs" },
+      { id: "split",     cat: "organize", name: "Split PDF",         desc: "Separate one page or a whole set for easy conversion into independent PDF files.", color: "orange",  icon: "split",    endpoint: "split-pdf/",         accept: PDF, fallback: "split.pdf", btn: "Extract pages",
+        fields: [{ name: "pages", label: "Pages (Click thumbnails above or type e.g. 1,3,5-7 or 2.5.3)", type: "text", placeholder: "e.g. 1, 3, 5-7", required: true }] },
+      { id: "compress",  cat: "optimize", name: "Compress PDF",      desc: "Reduce file size while optimizing for maximal PDF quality.", color: "emerald", icon: "compress", endpoint: "compress-pdf/",      accept: PDF, fallback: "compressed.pdf", btn: "Compress PDF",
         fields: [{ name: "level", label: "Compression level", type: "select", options: LEVELS }] },
-      { id: "pdf2jpg",  name: "PDF to JPG",    desc: "Pages to images (ZIP)",  color: "pink",    icon: "image",    endpoint: "pdf-to-jpg/",    accept: PDF, fallback: "images.zip", btn: "Convert to JPG", hint: "Up to 100 pages",
-        fields: [{ name: "dpi", label: "Quality", type: "select", options: DPIS }] },
-      { id: "pdf2word", name: "PDF to Word",   desc: "Editable .docx",         color: "blue",    icon: "word",     endpoint: "pdf-to-word/",   accept: PDF, fallback: "document.docx", btn: "Convert to Word", hint: "Up to 100 pages" },
-      { id: "pdf2xlsx", name: "PDF to Excel",  desc: "Tables to .xlsx",        color: "green",   icon: "excel",    endpoint: "pdf-to-excel/",  accept: PDF, fallback: "document.xlsx", btn: "Convert to Excel" },
-      { id: "pdf2txt",  name: "PDF to Text",   desc: "Plain .txt export",      color: "slate",   icon: "text",     endpoint: "pdf-to-text/",   accept: PDF, fallback: "document.txt", btn: "Extract text", hint: "Scanned PDFs need OCR" },
-      { id: "pdf2mp3",  name: "PDF to Speech", desc: "Listen as MP3",          color: "violet",  icon: "speech",   endpoint: "pdf-to-speech/", accept: PDF, fallback: "audio.mp3", btn: "Generate audio", hint: "Short documents work best",
-        fields: [{ name: "lang", label: "Language", type: "select", options: LANGS }] },
-      { id: "xlsx2pdf", name: "Excel to PDF",  desc: "Spreadsheet to PDF",     color: "lime",    icon: "excel",    endpoint: "excel-to-pdf/",  accept: ".xlsx,.xlsm", fallback: "spreadsheet.pdf", btn: "Convert to PDF", hint: ".xlsx or .xlsm", label: "Excel" },
-      { id: "img2pdf",  name: "Image to PDF",  desc: "JPG/PNG to PDF",         color: "fuchsia", icon: "image",    endpoint: "image-to-pdf/",  accept: "image/*,.jpg,.jpeg,.png,.webp,.bmp,.gif,.tif,.tiff", fallback: "image.pdf", btn: "Convert to PDF", hint: "JPG, PNG, WebP, BMP, GIF, TIFF", label: "image" },
-      { id: "crop",     name: "Crop PDF",      desc: "Trim page margins",      color: "indigo",  icon: "crop",     endpoint: "crop-pdf/",      accept: PDF, fallback: "cropped.pdf", btn: "Crop PDF",
+      { id: "edit",      cat: "edit",     name: "Edit PDF",          desc: "Edit existing PDF text in-place with automatic font & color matching, or whiteout sections.", color: "violet",  icon: "edit",     endpoint: "edit-pdf/",          accept: PDF, fallback: "edited.pdf", btn: "Open Studio", badge: "Sejda Mode" },
+      { id: "pdf2word",  cat: "convert",  name: "PDF to Word",       desc: "Easily convert your PDF files into easy to edit DOC and DOCX documents.", color: "blue",    icon: "word",     endpoint: "pdf-to-word/",       accept: PDF, fallback: "document.docx", btn: "Convert to Word" },
+      { id: "pptx2pdf",  cat: "convert",  name: "PowerPoint to PDF", desc: "Make PPT and PPTX slideshows easy to view by converting them to PDF.", color: "orange",  icon: "present",  endpoint: "powerpoint-to-pdf/", accept: ".pptx,.ppt", fallback: "presentation.pdf", btn: "Convert Slides to PDF", hint: ".pptx or .ppt files", label: "PowerPoint" },
+      { id: "pdf2xlsx",  cat: "convert",  name: "PDF to Excel",      desc: "Pull data straight from PDFs into Excel spreadsheets in a few short seconds.", color: "green",   icon: "excel",    endpoint: "pdf-to-excel/",      accept: PDF, fallback: "document.xlsx", btn: "Convert to Excel" },
+      { id: "word2pdf",  cat: "convert",  name: "Word to PDF",       desc: "Make DOC and DOCX files easy to read by converting them to PDF.", color: "blue",    icon: "word",     endpoint: "word-to-pdf/",       accept: ".docx", fallback: "document.pdf", btn: "Convert to PDF", hint: ".docx files", label: "Word" },
+      { id: "xlsx2pdf",  cat: "convert",  name: "Excel to PDF",      desc: "Make EXCEL spreadsheets easy to read by converting them to PDF.", color: "lime",    icon: "excel",    endpoint: "excel-to-pdf/",      accept: ".xlsx,.xlsm", fallback: "spreadsheet.pdf", btn: "Convert to PDF", hint: ".xlsx or .xlsm", label: "Excel" },
+      { id: "sign",      cat: "security", name: "Sign PDF",          desc: "Sign yourself or draw your electronic signature and stamp it on any page.", color: "indigo",  icon: "sign",     endpoint: "sign-pdf/",          accept: PDF, fallback: "signed.pdf", btn: "Sign PDF",
         fields: [
-          { name: "unit", label: "Unit", type: "select", options: [["mm", "Millimetres", true], ["cm", "Centimetres"], ["in", "Inches"], ["pt", "Points"]] },
+          { name: "signature_image", label: "Or Upload Signature Image (Optional if drawn above)", type: "file", accept: "image/*" },
+          { name: "position", label: "Signature Position", type: "select", options: [["bottom-right", "Bottom Right", true], ["bottom-left", "Bottom Left"], ["bottom-center", "Bottom Center"], ["center", "Center"]] },
+          { name: "pages", label: "Pages to Sign", type: "text", value: "last", placeholder: "last, first, all, or 1,3" }
+        ] },
+      { id: "watermark", cat: "edit",     name: "Watermark PDF",     desc: "Upload your background/watermark image or text and adjust transparency freely.", color: "amber",   icon: "drop",     endpoint: "watermark-pdf/",     accept: PDF, fallback: "watermarked.pdf", btn: "Apply Watermark",
+        fields: [
+          { name: "watermark_image", label: "Upload Background / Watermark Image (PNG/JPG)", type: "file", accept: "image/*" },
+          { name: "opacity", label: "Transparency / Opacity", type: "range", min: "5", max: "100", value: "30" },
+          { name: "position", label: "Placement Style", type: "select", options: [["center", "Center Stamp", true], ["stretch", "Full Page Background"], ["tile", "Repeated Tile Grid"], ["bottom-right", "Bottom Right"], ["top-right", "Top Right"]] },
+          { name: "layer", label: "Layer Order", type: "select", options: [["over", "Over PDF Content", true], ["under", "Behind PDF Content (Background)"]] },
+          { name: "text", label: "Or Watermark Text (Optional if image uploaded)", type: "text", placeholder: "e.g. CONFIDENTIAL" }
+        ] },
+      { id: "ocr",       cat: "optimize", name: "OCR PDF",           desc: "Easily convert scanned PDFs into searchable and selectable documents with Tesseract OCR.", color: "teal",    icon: "scan",     endpoint: "ocr-pdf/",           accept: PDF, fallback: "searchable_ocr.pdf", btn: "Run Tesseract OCR",
+        fields: [
+          { name: "lang", label: "Document Language", type: "select", options: [["eng", "English", true], ["urd", "Urdu"], ["ara", "Arabic"], ["hin", "Hindi"], ["fra", "French"], ["deu", "German"], ["spa", "Spanish"]] },
+          { name: "output_format", label: "Output Format", type: "select", options: [["pdf", "Searchable PDF (.pdf)", true], ["txt", "Extracted Text (.txt)"]] },
+          { name: "pages", label: "Pages (Optional)", type: "text", placeholder: "All pages, or e.g. 1-10" }
+        ] },
+      { id: "pdf2jpg",   cat: "convert",  name: "PDF to JPG",        desc: "Convert each PDF page into a JPG or extract all images contained in a PDF.", color: "pink",    icon: "image",    endpoint: "pdf-to-jpg/",        accept: PDF, fallback: "images.zip", btn: "Convert to JPG",
+        fields: [{ name: "dpi", label: "Quality", type: "select", options: DPIS }] },
+      { id: "img2pdf",   cat: "convert",  name: "JPG to PDF",        desc: "Convert JPG, PNG, and WebP images to PDF in seconds. Easily adjust orientation and margins.", color: "fuchsia", icon: "image",    endpoint: "image-to-pdf/",      accept: "image/*,.jpg,.jpeg,.png,.webp,.bmp,.gif,.tif,.tiff", multiple: true, fallback: "images.pdf", btn: "Convert to PDF", label: "image",
+        fields: [
+          { name: "pageSize", label: "Page Layout", type: "select", options: [["fit", "Fit to Image Size", true], ["a4p", "A4 Portrait"], ["a4l", "A4 Landscape"]] }
+        ] },
+      { id: "pagenums",  cat: "edit",     name: "Page Numbers",      desc: "Add page numbers into PDFs with ease. Choose your positions, dimensions, and typography.", color: "teal",    icon: "text",     endpoint: "add-page-numbers/",  accept: PDF, fallback: "numbered.pdf", btn: "Add Page Numbers",
+        fields: [
+          { name: "position", label: "Position", type: "select", options: [["bottom-center", "Bottom Center", true], ["bottom-right", "Bottom Right"], ["bottom-left", "Bottom Left"], ["top-right", "Top Right"], ["top-center", "Top Center"]] },
+          { name: "format", label: "Format", type: "select", options: [["page_of_total", "Page 1 of N", true], ["slash", "1 / N"], ["simple", "1, 2, 3..."], ["dash", "- 1 -"]] },
+          { name: "start_number", label: "Start Numbering At", type: "number", value: "1" }
+        ] },
+      { id: "crop",      cat: "edit",     name: "Crop PDF",          desc: "Visually crop margins of PDF documents or select specific areas to trim.", color: "indigo",  icon: "crop",     endpoint: "crop-pdf/",          accept: PDF, fallback: "cropped.pdf", btn: "Crop PDF",
+        fields: [
+          { name: "unit", label: "Unit", type: "select", options: [["pt", "Points (Auto from visual box)", true], ["mm", "Millimetres"], ["cm", "Centimetres"], ["in", "Inches"]] },
           { row: true, items: [
-            { name: "left", label: "Left", type: "number", value: "10" }, { name: "top", label: "Top", type: "number", value: "10" },
-            { name: "right", label: "Right", type: "number", value: "10" }, { name: "bottom", label: "Bottom", type: "number", value: "10" },
+            { name: "left", label: "Left", type: "number", value: "20" }, { name: "top", label: "Top", type: "number", value: "20" },
+            { name: "right", label: "Right", type: "number", value: "20" }, { name: "bottom", label: "Bottom", type: "number", value: "20" },
           ] },
           { name: "pages", label: "Pages (optional)", type: "text", placeholder: "All pages, or e.g. 1,3,5-7" },
         ] },
-    ];
-
-    const UPCOMING = [
-      { name: "Edit PDF",          desc: "Add text & whiteout",   color: "red",    icon: "edit",    status: "maintenance" },
-      { name: "Sign PDF",          desc: "Draw your signature",   color: "blue",   icon: "sign",    status: "soon" },
-      { name: "Watermark PDF",     desc: "Stamp text or a logo",  color: "amber",  icon: "drop",    status: "soon" },
-      { name: "OCR PDF",           desc: "Make scans searchable", color: "teal",   icon: "scan",    status: "soon" },
-      { name: "PDF to PowerPoint", desc: "Pages to slides",       color: "orange", icon: "present", status: "soon" },
+      { id: "unlock",    cat: "security", name: "Unlock PDF",        desc: "Remove PDF password security, giving you the freedom to use your PDFs as you want.", color: "teal",    icon: "unlock",   endpoint: "unlock-pdf/",        accept: PDF, fallback: "unlocked.pdf", btn: "Unlock PDF",
+        fields: [{ name: "password", label: "Current password", type: "password", placeholder: "Enter the PDF password", required: true }] },
+      { id: "protect",   cat: "security", name: "Protect PDF",       desc: "Protect PDF files with a strong AES-256 password. Encrypt PDF documents to prevent unauthorized access.", color: "amber",   icon: "lock",     endpoint: "protect-pdf/",       accept: PDF, fallback: "protected.pdf", btn: "Protect PDF",
+        fields: [{ name: "password", label: "Password", type: "password", placeholder: "Choose a strong password", required: true, autocomplete: "new-password" }] },
+      { id: "html2pdf",  cat: "convert",  name: "HTML to PDF",       desc: "Convert webpages in HTML to PDF. Upload an HTML file and convert it with a click.", color: "indigo",  icon: "text",     endpoint: "html-to-pdf/",       accept: ".html,.htm", fallback: "webpage.pdf", btn: "Convert HTML to PDF", label: "HTML" },
+      { id: "csv2pdf",   cat: "convert",  name: "CSV to PDF",        desc: "Transform CSV or TSV tabular datasets into clean landscape PDF tables.", color: "green",   icon: "excel",    endpoint: "csv-to-pdf/",        accept: ".csv,.tsv,.txt", fallback: "table.pdf", btn: "Convert CSV to PDF", label: "CSV" },
+      { id: "pdf2txt",   cat: "convert",  name: "PDF to Text",       desc: "Extract clean plain text (.txt) from your PDF documents in one click.", color: "slate",   icon: "text",     endpoint: "pdf-to-text/",       accept: PDF, fallback: "document.txt", btn: "Extract text" },
+      { id: "pdf2mp3",   cat: "convert",  name: "PDF to Speech",     desc: "Listen to your PDF documents live in browser or export spoken MP3 audio.", color: "violet",  icon: "speech",   endpoint: "pdf-to-speech/",     accept: PDF, fallback: "audio.mp3", btn: "Download MP3 Audio",
+        fields: [
+          { name: "speechPages", label: "Pages to Read", type: "text", placeholder: "e.g. 1-3", value: "1-3" },
+          { name: "lang", label: "Language", type: "select", options: LANGS }
+        ] },
     ];
 
     (() => {
       "use strict";
       const $ = (id) => document.getElementById(id);
-      const svg = (icon) => `<svg fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><use href="#i-${icon}"/></svg>`;
+      const svg = (icon) => `<svg fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><use href="#i-${icon}"/></svg>`;
 
-      const glow = (el) => el.addEventListener("pointermove", (e) => {
-        const r = el.getBoundingClientRect();
-        el.style.setProperty("--mx", `${e.clientX - r.left}px`);
-        el.style.setProperty("--my", `${e.clientY - r.top}px`);
-      });
+      function normalizePageString(raw) {
+        return (raw || "")
+          .trim()
+          .replace(/[\.\s;]+/g, ",")
+          .replace(/,+/g, ",")
+          .replace(/^,|,$/g, "");
+      }
 
+      function parseRangesToPages(raw, maxPages) {
+        const clean = normalizePageString(raw);
+        if (!clean) throw new Error("Please select or enter page numbers (e.g. 1,3,5-7).");
+        const parts = clean.split(",");
+        const pages = [];
+        const seen = new Set();
+        for (const part of parts) {
+          const m = /^(\d+)(?:-(\d+))?$/.exec(part.trim());
+          if (!m) throw new Error(`Invalid page token '${part}'. Use e.g. 1,3,5-7`);
+          const start = parseInt(m[1], 10);
+          const end = m[2] ? parseInt(m[2], 10) : start;
+          if (start < 1 || end < start) throw new Error(`Invalid page range '${part}'.`);
+          if (maxPages && end > maxPages) throw new Error(`Page ${end} exceeds total pages (${maxPages}).`);
+          for (let p = start; p <= end; p++) {
+            if (!seen.has(p)) { seen.add(p); pages.push(p); }
+          }
+        }
+        return pages;
+      }
+
+      // Build iLovePDF Card: Mobile = List Row (flex-row) | Laptop/Desktop = Grid Card (md:flex-col)
       const toolCard = (t) => {
         const card = document.createElement("button");
         card.type = "button";
+        card.dataset.category = t.cat;
+        card.dataset.toolId = t.id;
         card.className =
-          "card group relative text-left glass rounded-2xl shadow-glass hover:shadow-glow hover:border-white/25 " +
-          "active:scale-[.98] transition duration-300 " +
-          "flex flex-row items-center gap-3.5 p-3 md:flex-col md:items-start md:gap-0 md:p-4 md:hover:-translate-y-1";
+          "group relative text-left bg-white rounded-2xl border border-slate-200/80 shadow-card hover:shadow-cardHover hover:border-slate-300 " +
+          "active:scale-[.99] transition-all duration-200 " +
+          "flex flex-row items-center gap-4 p-4 md:flex-col md:items-start md:gap-0 md:p-6 md:hover:-translate-y-1";
         card.innerHTML = `
-          <span class="icon relative shrink-0 grid place-items-center w-11 h-11 md:w-12 md:h-12 rounded-2xl p-2.5 md:p-3 ${THEMES[t.color]} group-hover:scale-105 transition">${svg(t.icon)}</span>
-          <span class="relative min-w-0 flex-1 md:mt-3">
-            <h3 class="font-semibold text-sm md:text-base leading-tight truncate md:whitespace-normal"></h3>
-            <p class="mt-0.5 md:mt-1 text-xs text-white/50 truncate md:whitespace-normal"></p>
+          <span class="icon relative shrink-0 grid place-items-center w-12 h-12 rounded-xl p-2.5 ${THEMES[t.color]} group-hover:scale-105 transition">${svg(t.icon)}</span>
+          <span class="relative min-w-0 flex-1 md:mt-4">
+            <span class="flex items-center gap-2">
+              <h3 class="font-bold text-[15px] md:text-[18px] text-[#26262e] leading-snug truncate md:whitespace-normal"></h3>
+              ${t.badge ? `<span class="px-2 py-0.5 text-[10px] font-bold rounded-full bg-violet-100 text-violet-700 border border-violet-200">${t.badge}</span>` : ""}
+            </span>
+            <p class="mt-1 md:mt-2 text-xs md:text-[13px] text-slate-500 leading-relaxed line-clamp-2 md:line-clamp-3"></p>
           </span>
-          <svg class="relative md:hidden shrink-0 w-4 h-4 text-white/30 group-hover:text-white/60 transition" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><use href="#i-chevron"/></svg>`;
+          <svg class="relative md:hidden shrink-0 w-4 h-4 text-slate-400 group-hover:text-slate-700 transition" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><use href="#i-chevron"/></svg>`;
         card.querySelector("h3").textContent = t.name;
         card.querySelector("p").textContent = t.desc;
-        card.addEventListener("click", () => openTool(t));
-        glow(card);
+        card.addEventListener("click", () => {
+          // Enforce 3-Document Guest Limit before opening tool if quota is already 0
+          if (window.SyntaxAuth.requireAuthIfQuotaReached()) return;
+          if (t.id === "edit") openSejdaStudio();
+          else openTool(t);
+        });
         return card;
       };
 
-      const upcomingCard = (t) => {
-        const maint = t.status === "maintenance";
-        const card = document.createElement("div");
-        card.className =
-          "relative glass rounded-2xl opacity-60 cursor-not-allowed select-none " +
-          "flex flex-row items-center gap-3.5 p-3 md:flex-col md:items-start md:gap-0 md:p-4";
-        card.setAttribute("aria-disabled", "true");
-        card.innerHTML = `
-          <span class="icon shrink-0 grid place-items-center w-11 h-11 md:w-12 md:h-12 rounded-2xl p-2.5 md:p-3 grayscale ${THEMES[t.color]}">${svg(t.icon)}</span>
-          <span class="min-w-0 flex-1 md:mt-3">
-            <h3 class="font-semibold text-sm md:text-base leading-tight text-white/60 truncate md:whitespace-normal"></h3>
-            <p class="mt-0.5 md:mt-1 text-xs text-white/35 truncate md:whitespace-normal"></p>
-          </span>
-          <span class="relative shrink-0 md:absolute md:top-3 md:right-3 overflow-hidden px-2 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wide border whitespace-nowrap ${maint ? "bg-amber-400/15 text-amber-200 border-amber-300/30" : "bg-white/10 text-white/70 border-white/20"}">
-            <span class="absolute inset-0 bg-gradient-to-r from-transparent via-white/30 to-transparent animate-shimmer"></span>
-            <span class="relative">${maint ? "Under maintenance" : "Coming soon"}</span>
-          </span>`;
-        card.querySelector("h3").textContent = t.name;
-        card.querySelector("p").textContent = t.desc;
-        return card;
+      const gridEl = $("toolGrid");
+      gridEl.append(...TOOLS.map(toolCard));
+
+      // Category Filter Bar Logic
+      const filterTools = (cat) => {
+        document.querySelectorAll("#categoryBar .cat-pill").forEach((btn) => {
+          btn.classList.toggle("active", btn.dataset.cat === cat);
+        });
+        gridEl.querySelectorAll("[data-category]").forEach((card) => {
+          const showCard = cat === "all" || card.dataset.category === cat;
+          card.classList.toggle("hidden", !showCard);
+        });
       };
 
-      $("toolGrid").append(...TOOLS.map(toolCard));
-      $("upcomingGrid").append(...UPCOMING.map(upcomingCard));
+      document.querySelectorAll("#categoryBar .cat-pill").forEach((btn) => {
+        btn.addEventListener("click", () => filterTools(btn.dataset.cat));
+      });
+
+      document.querySelectorAll("[data-filter-jump]").forEach((btn) => {
+        btn.addEventListener("click", () => {
+          filterTools(btn.dataset.filterJump);
+          $("tools")?.scrollIntoView({ behavior: "smooth" });
+        });
+      });
+
+      document.querySelectorAll("[data-quick-tool]").forEach((btn) => {
+        btn.addEventListener("click", () => {
+          $("mobileMenu")?.classList.add("hidden");
+          if (window.SyntaxAuth.requireAuthIfQuotaReached()) return;
+          const id = btn.dataset.quickTool;
+          if (id === "edit") {
+            openSejdaStudio();
+          } else {
+            const found = TOOLS.find((x) => x.id === id);
+            if (found) openTool(found);
+          }
+        });
+      });
 
       const lock = (on) => document.body.classList.toggle("no-scroll", on);
       const show = (el) => { el.classList.remove("hidden"); el.classList.add("flex"); lock(true); };
       const hide = (el) => { el.classList.add("hidden"); el.classList.remove("flex"); lock(false); };
 
-      // Welcome Modal Setup
-      const welcome = $("welcome");
-      show(welcome);
-      $("welcomeClose").addEventListener("click", () => hide(welcome));
-      welcome.addEventListener("click", (e) => { if (e.target === welcome) hide(welcome); });
-
-      // About Modal Setup
+      // Info Modals (About, Support/Ideas, Privacy 15-pt, Terms 25-pt)
       const aboutModal = $("aboutModal");
-      const showAbout = () => show(aboutModal);
-      const hideAbout = () => hide(aboutModal);
-      
-      $("aboutBtn").addEventListener("click", showAbout);
-      $("mobileAboutBtn").addEventListener("click", () => {
-        $("mobileMenu").classList.add("hidden");
-        showAbout();
+      const supportModal = $("supportModal");
+      const privacyModal = $("privacyModal");
+      const termsModal = $("termsModal");
+
+      $("aboutBtn")?.addEventListener("click", () => show(aboutModal));
+      $("mobileAboutBtn")?.addEventListener("click", () => { $("mobileMenu").classList.add("hidden"); show(aboutModal); });
+      $("aboutClose")?.addEventListener("click", () => hide(aboutModal));
+      aboutModal?.addEventListener("click", (e) => { if (e.target === aboutModal) hide(aboutModal); });
+
+      const openSupport = () => { $("mobileMenu")?.classList.add("hidden"); show(supportModal); };
+      $("supportBtnTop")?.addEventListener("click", openSupport);
+      $("footerSupportBtn")?.addEventListener("click", openSupport);
+      $("mobileSupportBtn")?.addEventListener("click", openSupport);
+      $("supportClose")?.addEventListener("click", () => hide(supportModal));
+      supportModal?.addEventListener("click", (e) => { if (e.target === supportModal) hide(supportModal); });
+
+      $("ideaQuickForm")?.addEventListener("submit", (e) => {
+        e.preventDefault();
+        const subj = encodeURIComponent("[SyntaxPDF Idea/Support] " + ($("ideaSubject").value || "Feedback"));
+        const body = encodeURIComponent($("ideaMessage").value || "");
+        window.location.href = `mailto:umarasifmirza439@gmail.com,mrtach777@gmail.com?subject=${subj}&body=${body}`;
       });
-      $("aboutClose").addEventListener("click", hideAbout);
-      aboutModal.addEventListener("click", (e) => { if (e.target === aboutModal) hideAbout(); });
+
+      const openPrivacy = () => { $("mobileMenu")?.classList.add("hidden"); show(privacyModal); };
+      $("footerPrivacyBtn")?.addEventListener("click", openPrivacy);
+      $("mobilePrivacyBtn")?.addEventListener("click", openPrivacy);
+      $("cardPrivacyBtn")?.addEventListener("click", openPrivacy);
+      $("privacyClose")?.addEventListener("click", () => hide(privacyModal));
+      privacyModal?.addEventListener("click", (e) => { if (e.target === privacyModal) hide(privacyModal); });
+
+      const openTerms = () => { $("mobileMenu")?.classList.add("hidden"); show(termsModal); };
+      $("footerTermsBtn")?.addEventListener("click", openTerms);
+      $("mobileTermsBtn")?.addEventListener("click", openTerms);
+      $("termsClose")?.addEventListener("click", () => hide(termsModal));
+      termsModal?.addEventListener("click", (e) => { if (e.target === termsModal) hide(termsModal); });
 
       // Tools Modal Setup
       const modal = $("toolModal"), form = $("toolForm"), fileInput = $("mFile"), fields = $("mFields");
       const status = $("mStatus"), fileList = $("mFiles");
       let current = null;
 
-      const inputCls = "w-full rounded-xl border border-white/15 bg-white/[0.06] px-3.5 py-2.5 text-sm text-white placeholder-white/30 outline-none focus:border-violet-400/60 focus:ring-4 focus:ring-violet-500/15 appearance-none";
+      let activePdfDoc = null;
+      let selectedSplitPages = new Set();
+      let cropPageNum = 1;
+      let cropPdfPageSize = { width: 612, height: 792 };
+      let cropRectPct = { left: 0.08, top: 0.08, right: 0.08, bottom: 0.08 };
+      let extractedSpeechText = "";
+
+      // Signature Pad Drawing Setup
+      const signCanvas = $("signPadCanvas");
+      const signCtx = signCanvas ? signCanvas.getContext("2d") : null;
+      let signHasInk = false;
+      if (signCanvas && signCtx) {
+        let drawing = false;
+        signCtx.lineWidth = 2.6;
+        signCtx.lineCap = "round";
+        signCtx.strokeStyle = "#0f172a";
+        const pt = (e) => {
+          const r = signCanvas.getBoundingClientRect();
+          return {
+            x: (e.clientX - r.left) * (signCanvas.width / r.width),
+            y: (e.clientY - r.top) * (signCanvas.height / r.height),
+          };
+        };
+        signCanvas.addEventListener("pointerdown", (e) => {
+          drawing = true; signHasInk = true;
+          const p = pt(e);
+          signCtx.beginPath(); signCtx.moveTo(p.x, p.y);
+          signCanvas.setPointerCapture(e.pointerId);
+        });
+        signCanvas.addEventListener("pointermove", (e) => {
+          if (!drawing) return;
+          const p = pt(e);
+          signCtx.lineTo(p.x, p.y); signCtx.stroke();
+        });
+        signCanvas.addEventListener("pointerup", () => { drawing = false; });
+        $("signClearBtn")?.addEventListener("click", () => {
+          signCtx.clearRect(0, 0, signCanvas.width, signCanvas.height);
+          signHasInk = false;
+        });
+      }
+
+      const inputCls = "w-full rounded-xl border border-white/15 bg-white/[0.06] px-3.5 py-2.5 text-sm text-white placeholder-white/30 outline-none focus:border-red-400/70 focus:ring-4 focus:ring-red-500/15 appearance-none";
 
       const fieldEl = (f) => {
         const wrap = document.createElement("label");
         wrap.className = "block";
-        wrap.innerHTML = `<span class="block text-[11px] font-semibold uppercase tracking-wider text-white/45 mb-1"></span>`;
-        wrap.querySelector("span").textContent = f.label;
+        const span = document.createElement("span");
+        span.className = "block text-[11px] font-semibold uppercase tracking-wider text-white/50 mb-1";
+        span.textContent = f.type === "range" ? `${f.label}: ${f.value}%` : f.label;
+        wrap.appendChild(span);
+
         let el;
         if (f.type === "select") {
           el = document.createElement("select");
@@ -638,6 +1417,17 @@
             o.value = v; o.textContent = l; o.selected = !!sel;
             el.appendChild(o);
           });
+        } else if (f.type === "range") {
+          el = document.createElement("input");
+          el.type = "range";
+          el.min = f.min || "5"; el.max = f.max || "100"; el.value = f.value || "30";
+          el.className = "w-full accent-brandRed cursor-pointer";
+          el.addEventListener("input", () => { span.textContent = `${f.label}: ${el.value}%`; });
+        } else if (f.type === "file") {
+          el = document.createElement("input");
+          el.type = "file";
+          if (f.accept) el.accept = f.accept;
+          el.className = inputCls + " file:mr-3 file:py-1 file:px-3 file:rounded-lg file:border-0 file:bg-red-500/20 file:text-red-200 file:text-xs";
         } else {
           el = document.createElement("input");
           el.type = f.type; el.className = inputCls;
@@ -653,29 +1443,247 @@
 
       const setStatus = (msg, kind = "") => {
         status.textContent = msg;
-        status.className = `mt-3 min-h-[1.25rem] text-center text-sm ${kind === "error" ? "text-rose-300 font-medium" : kind === "ok" ? "text-emerald-300 font-medium" : "text-white/50"}`;
+        status.className = `mt-3 min-h-[1.25rem] text-center text-sm ${kind === "error" ? "text-rose-300 font-medium" : kind === "ok" ? "text-emerald-300 font-medium" : "text-white/60"}`;
       };
 
-      const setLoading = (on) => {
+      const setLoading = (on, customText) => {
         $("mSubmit").disabled = on;
         $("mSpinner").classList.toggle("hidden", !on);
         $("mBar").classList.toggle("hidden", !on);
-        $("mBtnLabel").textContent = on ? "Processing..." : current.btn;
+        $("mBtnLabel").textContent = on ? (customText || "Processing...") : current.btn;
       };
+
+      function resetToolPreviews() {
+        $("mSplitPreview").classList.add("hidden");
+        $("mSplitGrid").replaceChildren();
+        $("mCropPreview").classList.add("hidden");
+        $("mSpeechPlayer").classList.add("hidden");
+        if (window.speechSynthesis) window.speechSynthesis.cancel();
+        activePdfDoc = null;
+        selectedSplitPages.clear();
+        extractedSpeechText = "";
+      }
+
+      // Visual Split Preview
+      async function setupSplitPreview(file) {
+        if (!window.pdfjsLib) return;
+        try {
+          const buf = await file.arrayBuffer();
+          activePdfDoc = await pdfjsLib.getDocument({ data: buf }).promise;
+          const total = activePdfDoc.numPages;
+          $("mSplitPreview").classList.remove("hidden");
+          $("mSplitCount").textContent = `${total} page(s) detected · Tap pages to extract`;
+          const grid = $("mSplitGrid");
+          grid.replaceChildren();
+          const renderLimit = Math.min(total, 60);
+
+          const syncPagesInput = () => {
+            const pagesInput = fields.querySelector('input[name="pages"]');
+            if (pagesInput) pagesInput.value = [...selectedSplitPages].sort((a, b) => a - b).join(",");
+          };
+
+          for (let p = 1; p <= renderLimit; p++) {
+            const item = document.createElement("button");
+            item.type = "button";
+            item.className = "relative rounded-xl overflow-hidden border border-white/15 bg-black/40 p-1 flex flex-col items-center hover:border-red-400 transition";
+            const cv = document.createElement("canvas");
+            cv.className = "w-full h-auto rounded";
+            const badge = document.createElement("span");
+            badge.className = "mt-1 text-[10px] font-semibold text-white/70";
+            badge.textContent = `Page ${p}`;
+            item.append(cv, badge);
+            grid.appendChild(item);
+
+            item.addEventListener("click", () => {
+              if (selectedSplitPages.has(p)) {
+                selectedSplitPages.delete(p);
+                item.classList.remove("ring-2", "ring-red-400", "bg-red-500/20");
+              } else {
+                selectedSplitPages.add(p);
+                item.classList.add("ring-2", "ring-red-400", "bg-red-500/20");
+              }
+              syncPagesInput();
+            });
+
+            activePdfDoc.getPage(p).then((page) => {
+              const vp = page.getViewport({ scale: 0.25 });
+              cv.width = vp.width; cv.height = vp.height;
+              page.render({ canvasContext: cv.getContext("2d"), viewport: vp });
+            });
+          }
+
+          $("mSplitSelectAll").onclick = () => {
+            const buttons = [...grid.querySelectorAll("button")];
+            if (selectedSplitPages.size > 0) {
+              selectedSplitPages.clear();
+              buttons.forEach((b) => b.classList.remove("ring-2", "ring-red-400", "bg-red-500/20"));
+            } else {
+              buttons.forEach((b, i) => {
+                selectedSplitPages.add(i + 1);
+                b.classList.add("ring-2", "ring-red-400", "bg-red-500/20");
+              });
+            }
+            syncPagesInput();
+          };
+        } catch (err) {
+          console.warn("Could not render split preview:", err);
+        }
+      }
+
+      // Visual Crop Preview
+      async function setupCropPreview(file) {
+        if (!window.pdfjsLib) return;
+        try {
+          const buf = await file.arrayBuffer();
+          activePdfDoc = await pdfjsLib.getDocument({ data: buf }).promise;
+          cropPageNum = 1;
+          cropRectPct = { left: 0.08, top: 0.08, right: 0.08, bottom: 0.08 };
+          $("mCropPreview").classList.remove("hidden");
+          await renderCropPage();
+        } catch (err) {
+          console.warn("Could not load crop preview:", err);
+        }
+      }
+
+      async function renderCropPage() {
+        if (!activePdfDoc) return;
+        const page = await activePdfDoc.getPage(cropPageNum);
+        const unscaled = page.getViewport({ scale: 1 });
+        cropPdfPageSize = { width: unscaled.width, height: unscaled.height };
+        const scale = Math.min(340 / unscaled.width, 380 / unscaled.height);
+        const vp = page.getViewport({ scale });
+        const cv = $("cropCanvas");
+        cv.width = vp.width; cv.height = vp.height;
+        await page.render({ canvasContext: cv.getContext("2d"), viewport: vp }).promise;
+        $("cropPageIndicator").textContent = `Page ${cropPageNum} / ${activePdfDoc.numPages}`;
+        updateCropBoxUI();
+      }
+
+      function updateCropBoxUI() {
+        const box = $("cropBox");
+        box.style.left = `${cropRectPct.left * 100}%`;
+        box.style.top = `${cropRectPct.top * 100}%`;
+        box.style.right = `${cropRectPct.right * 100}%`;
+        box.style.bottom = `${cropRectPct.bottom * 100}%`;
+
+        const unitSel = fields.querySelector('select[name="unit"]');
+        const unit = unitSel ? unitSel.value : "pt";
+        const factor = { pt: 1, mm: 25.4 / 72, cm: 2.54 / 72, in: 1 / 72 }[unit] || 1;
+
+        const setField = (name, valPt) => {
+          const input = fields.querySelector(`input[name="${name}"]`);
+          if (input) input.value = Math.max(0, (valPt * factor)).toFixed(1);
+        };
+        setField("left", cropRectPct.left * cropPdfPageSize.width);
+        setField("right", cropRectPct.right * cropPdfPageSize.width);
+        setField("top", cropRectPct.top * cropPdfPageSize.height);
+        setField("bottom", cropRectPct.bottom * cropPdfPageSize.height);
+      }
+
+      (() => {
+        const box = $("cropBox");
+        const wrap = $("cropCanvasWrap");
+        let dragMode = null, startX = 0, startY = 0, startRect = null;
+
+        box.addEventListener("pointerdown", (e) => {
+          e.stopPropagation();
+          dragMode = e.target.dataset.dir || "move";
+          startX = e.clientX; startY = e.clientY;
+          startRect = { ...cropRectPct };
+          box.setPointerCapture(e.pointerId);
+        });
+
+        box.addEventListener("pointermove", (e) => {
+          if (!dragMode) return;
+          const r = wrap.getBoundingClientRect();
+          if (!r.width || !r.height) return;
+          const dx = (e.clientX - startX) / r.width;
+          const dy = (e.clientY - startY) / r.height;
+
+          const clamp = (v, min, max) => Math.min(max, Math.max(min, v));
+          if (dragMode === "move") {
+            const w = 1 - startRect.left - startRect.right;
+            const h = 1 - startRect.top - startRect.bottom;
+            cropRectPct.left = clamp(startRect.left + dx, 0, 1 - w);
+            cropRectPct.right = 1 - cropRectPct.left - w;
+            cropRectPct.top = clamp(startRect.top + dy, 0, 1 - h);
+            cropRectPct.bottom = 1 - cropRectPct.top - h;
+          } else {
+            if (dragMode.includes("w")) cropRectPct.left = clamp(startRect.left + dx, 0, 0.85 - cropRectPct.right);
+            if (dragMode.includes("e")) cropRectPct.right = clamp(startRect.right - dx, 0, 0.85 - cropRectPct.left);
+            if (dragMode.includes("n")) cropRectPct.top = clamp(startRect.top + dy, 0, 0.85 - cropRectPct.bottom);
+            if (dragMode.includes("s")) cropRectPct.bottom = clamp(startRect.bottom - dy, 0, 0.85 - cropRectPct.top);
+          }
+          updateCropBoxUI();
+        });
+
+        box.addEventListener("pointerup", () => { dragMode = null; });
+        $("cropPrevPage").addEventListener("click", () => {
+          if (activePdfDoc && cropPageNum > 1) { cropPageNum--; renderCropPage(); }
+        });
+        $("cropNextPage").addEventListener("click", () => {
+          if (activePdfDoc && cropPageNum < activePdfDoc.numPages) { cropPageNum++; renderCropPage(); }
+        });
+      })();
+
+      // Speech Preview
+      async function setupSpeechPreview(file) {
+        if (!window.pdfjsLib) return;
+        try {
+          const buf = await file.arrayBuffer();
+          activePdfDoc = await pdfjsLib.getDocument({ data: buf }).promise;
+          const maxP = Math.min(activePdfDoc.numPages, 5);
+          const chunks = [];
+          for (let p = 1; p <= maxP; p++) {
+            const page = await activePdfDoc.getPage(p);
+            const tc = await page.getTextContent();
+            chunks.push(tc.items.map((i) => i.str).join(" "));
+          }
+          extractedSpeechText = chunks.join("\n\n").trim();
+          $("mSpeechPlayer").classList.remove("hidden");
+          $("ttsPreviewText").textContent = extractedSpeechText
+            ? extractedSpeechText.slice(0, 600) + (extractedSpeechText.length > 600 ? "..." : "")
+            : "No selectable text found on the first pages (Scanned PDF).";
+        } catch (err) {
+          console.warn("Speech preview error:", err);
+        }
+      }
+
+      $("ttsPlayBtn").addEventListener("click", () => {
+        if (!extractedSpeechText) return setStatus("No text found to read aloud.", "error");
+        if (!("speechSynthesis" in window)) return setStatus("Browser speech synthesis not supported.", "error");
+        window.speechSynthesis.cancel();
+        const utter = new SpeechSynthesisUtterance(extractedSpeechText.slice(0, 15000));
+        const langSel = fields.querySelector('select[name="lang"]');
+        if (langSel) utter.lang = langSel.value;
+        window.speechSynthesis.speak(utter);
+      });
+      $("ttsStopBtn").addEventListener("click", () => {
+        if (window.speechSynthesis) window.speechSynthesis.cancel();
+      });
 
       const renderFiles = () => {
         fileList.replaceChildren();
-        [...fileInput.files].forEach((f, i) => {
+        resetToolPreviews();
+        const files = [...fileInput.files];
+        files.forEach((f, i) => {
           const li = document.createElement("li");
           li.className = "flex items-center gap-2 px-2.5 py-1.5 rounded-lg bg-white/[0.06] border border-white/10";
           const n = document.createElement("span"); n.className = "truncate"; n.textContent = (fileInput.multiple ? `${i + 1}. ` : "") + f.name;
           const s = document.createElement("span"); s.className = "ml-auto shrink-0 text-white/40"; s.textContent = `${(f.size / 1048576).toFixed(f.size < 1048576 ? 2 : 1)} MB`;
           li.append(n, s); fileList.appendChild(li);
         });
+
+        if (files.length === 1 && current) {
+          if (current.id === "split") setupSplitPreview(files[0]);
+          if (current.id === "crop") setupCropPreview(files[0]);
+          if (current.id === "pdf2mp3") setupSpeechPreview(files[0]);
+        }
       };
 
       const openTool = (t) => {
         current = t;
+        resetToolPreviews();
         $("mIcon").className = `icon grid place-items-center w-12 h-12 rounded-2xl p-3 ${THEMES[t.color]}`;
         $("mIcon").innerHTML = svg(t.icon);
         $("mTitle").textContent = t.name;
@@ -693,31 +1701,39 @@
             fields.appendChild(row);
           } else fields.appendChild(fieldEl(f));
         });
+
+        if ($("mSignPadWrap")) {
+          $("mSignPadWrap").classList.toggle("hidden", t.id !== "sign");
+          if (t.id === "sign" && signCtx) {
+            signCtx.clearRect(0, 0, signCanvas.width, signCanvas.height);
+            signHasInk = false;
+          }
+        }
+
         setStatus("");
         show(modal);
       };
 
-      const closeModal = () => { if (!$("mSubmit").disabled) hide(modal); };
+      const closeModal = () => {
+        if (!$("mSubmit").disabled) {
+          resetToolPreviews();
+          hide(modal);
+        }
+      };
       $("modalClose").addEventListener("click", closeModal);
       modal.addEventListener("click", (e) => { if (e.target === modal) closeModal(); });
-      document.addEventListener("keydown", (e) => { 
-        if (e.key === "Escape") { 
-          closeModal(); hide(welcome); hide(aboutModal);
-        } 
-      });
 
       fileInput.addEventListener("change", () => { renderFiles(); setStatus(""); });
       const dz = $("dropzone");
-      ["dragenter", "dragover"].forEach((ev) => dz.addEventListener(ev, (e) => { e.preventDefault(); dz.classList.add("border-violet-400/70", "bg-white/10"); }));
-      ["dragleave", "drop"].forEach((ev) => dz.addEventListener(ev, () => dz.classList.remove("border-violet-400/70", "bg-white/10")));
+      ["dragenter", "dragover"].forEach((ev) => dz.addEventListener(ev, (e) => { e.preventDefault(); dz.classList.add("border-red-400/70", "bg-white/10"); }));
+      ["dragleave", "drop"].forEach((ev) => dz.addEventListener(ev, () => dz.classList.remove("border-red-400/70", "bg-white/10")));
       dz.addEventListener("drop", (e) => {
         e.preventDefault();
         const dt = new DataTransfer();
         [...e.dataTransfer.files].slice(0, fileInput.multiple ? 50 : 1).forEach((f) => dt.items.add(f));
         fileInput.files = dt.files; renderFiles();
       });
-
-      const filenameFrom = (res, fallback) => {
+    const filenameFrom = (res, fallback) => {
         const h = res.headers.get("Content-Disposition") || "";
         const enc = /filename\*=UTF-8''([^;]+)/i.exec(h);
         if (enc) { try { return decodeURIComponent(enc[1]); } catch (_) {} }
@@ -731,29 +1747,173 @@
         setTimeout(() => URL.revokeObjectURL(url), 10000);
       };
 
+      // ================= CLIENT-SIDE PROCESSORS (BYPASSES HTTP 413 ON HUGE FILES) =================
+      async function clientMergePdfs(files) {
+        const { PDFDocument } = window.PDFLib;
+        const merged = await PDFDocument.create();
+        for (const f of files) {
+          const bytes = await f.arrayBuffer();
+          const pdf = await PDFDocument.load(bytes);
+          const copied = await merged.copyPages(pdf, pdf.getPageIndices());
+          copied.forEach((p) => merged.addPage(p));
+        }
+        const outBytes = await merged.save();
+        return new Blob([outBytes], { type: "application/pdf" });
+      }
+
+      async function clientSplitPdf(file, rawPages) {
+        const { PDFDocument } = window.PDFLib;
+        const bytes = await file.arrayBuffer();
+        const src = await PDFDocument.load(bytes);
+        const total = src.getPageCount();
+        const pageNums = parseRangesToPages(rawPages, total);
+        const out = await PDFDocument.create();
+        const copied = await out.copyPages(src, pageNums.map((p) => p - 1));
+        copied.forEach((p) => out.addPage(p));
+        const outBytes = await out.save();
+        return new Blob([outBytes], { type: "application/pdf" });
+      }
+
+      async function clientImagesToPdf(files, layout) {
+        const { PDFDocument } = window.PDFLib;
+        const doc = await PDFDocument.create();
+        for (const file of files) {
+          const dataUrl = await new Promise((res, rej) => {
+            const img = new Image();
+            img.onload = () => {
+              const c = document.createElement("canvas");
+              c.width = img.naturalWidth; c.height = img.naturalHeight;
+              const ctx = c.getContext("2d");
+              ctx.fillStyle = "#ffffff";
+              ctx.fillRect(0, 0, c.width, c.height);
+              ctx.drawImage(img, 0, 0);
+              res({ url: c.toDataURL("image/jpeg", 0.92), w: c.width, h: c.height });
+            };
+            img.onerror = rej;
+            img.src = URL.createObjectURL(file);
+          });
+          const jpgBytes = await fetch(dataUrl.url).then((r) => r.arrayBuffer());
+          const embedded = await doc.embedJpg(jpgBytes);
+          let pw = dataUrl.w, ph = dataUrl.h;
+          if (layout === "a4p") { pw = 595.28; ph = 841.89; }
+          else if (layout === "a4l") { pw = 841.89; ph = 595.28; }
+          const page = doc.addPage([pw, ph]);
+          const margin = layout === "fit" ? 0 : 24;
+          const availW = pw - margin * 2, availH = ph - margin * 2;
+          const scale = Math.min(availW / dataUrl.w, availH / dataUrl.h);
+          const drawW = dataUrl.w * scale, drawH = dataUrl.h * scale;
+          page.drawImage(embedded, {
+            x: (pw - drawW) / 2,
+            y: (ph - drawH) / 2,
+            width: drawW,
+            height: drawH,
+          });
+        }
+        const outBytes = await doc.save();
+        return new Blob([outBytes], { type: "application/pdf" });
+      }
+
+      // ================= FORM SUBMIT HANDLER (WITH 3-DOC GUEST QUOTA ENFORCEMENT) =================
       form.addEventListener("submit", async (e) => {
         e.preventDefault();
+
+        // Check 3-document guest limit before processing
+        if (window.SyntaxAuth.requireAuthIfQuotaReached()) {
+          closeModal();
+          return;
+        }
+
         const files = [...fileInput.files];
         const min = current.minFiles || 1;
         if (files.length < min) return setStatus(min > 1 ? `Select at least ${min} files.` : `Select a ${current.label || "PDF"} file.`, "error");
+
+        const pagesField = fields.querySelector('input[name="pages"]');
+        if (pagesField && pagesField.value.trim() && !["last", "first", "all"].includes(pagesField.value.trim().toLowerCase())) {
+          pagesField.value = normalizePageString(pagesField.value);
+        }
+
         for (const el of fields.querySelectorAll("[required]")) {
           if (!el.value.trim()) { el.focus(); return setStatus(`${el.closest("label").querySelector("span").textContent} is required.`, "error"); }
         }
 
-        const fd = new FormData();
-        files.forEach((f) => fd.append(fileInput.name, f));
-        fields.querySelectorAll("input, select").forEach((el) => { if (el.value !== "") fd.append(el.name, el.value); });
-
-        setLoading(true); setStatus("Uploading and processing...");
+        setLoading(true); setStatus("Processing document...");
         try {
-          const res = await fetch(API_BASE + current.endpoint, { method: "POST", body: fd });
+          if (current.id === "merge" && window.PDFLib) {
+            try {
+              const blob = await clientMergePdfs(files);
+              download(blob, "merged.pdf");
+              window.SyntaxAuth.recordSuccess();
+              setStatus("Done! Merged instantly in browser · merged.pdf", "ok");
+              return;
+            } catch (clientErr) {
+              console.warn("Client merge fallback to server:", clientErr);
+            }
+          }
+
+          if (current.id === "split" && window.PDFLib) {
+            try {
+              const rawPages = fields.querySelector('input[name="pages"]').value;
+              const blob = await clientSplitPdf(files[0], rawPages);
+              const base = files[0].name.replace(/\.pdf$/i, "");
+              download(blob, `${base}_split.pdf`);
+              window.SyntaxAuth.recordSuccess();
+              setStatus(`Done! Extracted pages · ${base}_split.pdf`, "ok");
+              return;
+            } catch (splitErr) {
+              return setStatus(splitErr.message || "Could not extract pages.", "error");
+            }
+          }
+
+          if (current.id === "img2pdf" && window.PDFLib && files.length >= 1) {
+            try {
+              const layoutSel = fields.querySelector('select[name="pageSize"]');
+              const blob = await clientImagesToPdf(files, layoutSel ? layoutSel.value : "fit");
+              download(blob, files.length > 1 ? "images_merged.pdf" : `${files[0].name.replace(/\.[^.]+$/, "")}.pdf`);
+              window.SyntaxAuth.recordSuccess();
+              setStatus(`Done! Converted ${files.length} image(s) to PDF.`, "ok");
+              return;
+            } catch (imgErr) {
+              console.warn("Client img2pdf fallback to server:", imgErr);
+            }
+          }
+
+          let uploadFiles = files;
+          if (current.id === "pdf2mp3" && window.PDFLib) {
+            const spInput = fields.querySelector('input[name="speechPages"]');
+            const rangeStr = (spInput && spInput.value.trim()) ? spInput.value : "1-3";
+            try {
+              const subBlob = await clientSplitPdf(files[0], rangeStr);
+              uploadFiles = [new File([subBlob], files[0].name, { type: "application/pdf" })];
+            } catch (_) {}
+          }
+
+          const fd = new FormData();
+          uploadFiles.forEach((f) => fd.append(fileInput.name, f));
+          fields.querySelectorAll("input, select").forEach((el) => {
+            if (el.type === "file") {
+              if (el.files && el.files[0]) fd.append(el.name, el.files[0]);
+            } else if (el.value !== "" && el.name !== "speechPages" && el.name !== "pageSize") {
+              fd.append(el.name, el.value);
+            }
+          });
+
+          if (current.id === "sign" && signHasInk && signCanvas) {
+            fd.append("signature_data", signCanvas.toDataURL("image/png"));
+          }
+
+          const headers = await authHeaders();
+          const res = await fetch(API_BASE + current.endpoint, { method: "POST", headers, body: fd });
           if (!res.ok) {
             const err = await res.json().catch(() => ({}));
+            if (res.status === 413) {
+              return setStatus(err.error || "File exceeds server upload limit (HTTP 413). Increase Nginx client_max_body_size.", "error");
+            }
             return setStatus(err.error || `Request failed (HTTP ${res.status}).`, "error");
           }
           const blob = await res.blob();
           const name = filenameFrom(res, current.fallback);
           download(blob, name);
+          window.SyntaxAuth.recordSuccess();
           const o = Number(res.headers.get("X-Original-Size")), c = Number(res.headers.get("X-Compressed-Size"));
           setStatus(o && c ? `Done! ${Math.max(0, Math.round((1 - c / o) * 100))}% smaller · ${name}` : `Done! Downloaded ${name}`, "ok");
           fields.querySelectorAll('input[type="password"]').forEach((el) => (el.value = ""));
@@ -765,15 +1925,913 @@
         }
       });
 
+      // ================= SEJDA-STYLE LIVE PDF EDITOR (HI-DPI + AUTO COLOR & FONT MATCH) =================
+      const sejdaModal = $("sejdaModal");
+      const sejdaFileInput = $("sejdaFileInput");
+      const sejdaEmptyState = $("sejdaEmptyState");
+      const sejdaPagesContainer = $("sejdaPagesContainer");
+      const sejdaStatusBar = $("sejdaStatusBar");
+
+      let sejdaFile = null;
+      let sejdaPdfDoc = null;
+      let sejdaTool = "editText";
+      let sejdaElements = [];
+      let activeSejdaEl = null;
+      let sejdaBold = false;
+      let sejdaItalic = false;
+
+      const CSS_FONTS = {
+        sans: "Helvetica, Arial, sans-serif",
+        serif: "'Times New Roman', Times, Georgia, serif",
+        mono: "'Courier New', Courier, monospace",
+      };
+
+      function openSejdaStudio() {
+        if (window.SyntaxAuth.requireAuthIfQuotaReached()) return;
+        show(sejdaModal);
+        if (!sejdaFile) {
+          sejdaEmptyState.classList.remove("hidden");
+          sejdaPagesContainer.replaceChildren();
+        }
+      }
+
+      $("sejdaCloseBtn").addEventListener("click", () => hide(sejdaModal));
+      sejdaEmptyState.addEventListener("click", () => sejdaFileInput.click());
+
+      function rgbToHex(r, g, b) {
+        const toHex = (n) => Math.max(0, Math.min(255, Math.round(n))).toString(16).padStart(2, "0");
+        return `#${toHex(r)}${toHex(g)}${toHex(b)}`;
+      }
+
+      // Smart Pixel Sampler: Samples border pixels for Background Color & inner high-contrast pixels for Text Color
+      function detectColorsFromCanvas(ctx, xCss, yCss, wCss, hCss, dpr) {
+        try {
+          const pad = Math.max(2, Math.round(3 * dpr));
+          const sx = Math.max(0, Math.floor(xCss * dpr) - pad);
+          const sy = Math.max(0, Math.floor(yCss * dpr) - pad);
+          const sw = Math.min(ctx.canvas.width - sx, Math.ceil(wCss * dpr) + pad * 2);
+          const sh = Math.min(ctx.canvas.height - sy, Math.ceil(hCss * dpr) + pad * 2);
+          if (sw < 4 || sh < 4) return { bgHex: "#ffffff", fgHex: "#000000" };
+
+          const img = ctx.getImageData(sx, sy, sw, sh).data;
+          const borderBuckets = new Map();
+          const addBgSample = (px, py) => {
+            const idx = (py * sw + px) * 4;
+            const r = img[idx], g = img[idx + 1], b = img[idx + 2];
+            const qr = r & 252, qg = g & 252, qb = b & 252;
+            const key = (qr << 16) | (qg << 8) | qb;
+            const cur = borderBuckets.get(key) || { count: 0, r: 0, g: 0, b: 0 };
+            cur.count++; cur.r += r; cur.g += g; cur.b += b;
+            borderBuckets.set(key, cur);
+          };
+
+          for (let x = 0; x < sw; x++) {
+            addBgSample(x, 0);
+            addBgSample(x, sh - 1);
+            if (sh > 2) { addBgSample(x, 1); addBgSample(x, sh - 2); }
+          }
+          for (let y = 2; y < sh - 2; y++) {
+            addBgSample(0, y);
+            addBgSample(sw - 1, y);
+          }
+
+          let bestBg = { count: -1, r: 255, g: 255, b: 255 };
+          for (const bucket of borderBuckets.values()) {
+            if (bucket.count > bestBg.count) bestBg = bucket;
+          }
+          const bgR = bestBg.r / Math.max(1, bestBg.count);
+          const bgG = bestBg.g / Math.max(1, bestBg.count);
+          const bgB = bestBg.b / Math.max(1, bestBg.count);
+          const bgHex = rgbToHex(bgR, bgG, bgB);
+
+          const candidates = [];
+          for (let y = pad; y < sh - pad; y++) {
+            for (let x = pad; x < sw - pad; x++) {
+              const idx = (y * sw + x) * 4;
+              const r = img[idx], g = img[idx + 1], b = img[idx + 2];
+              const dist = Math.hypot(r - bgR, g - bgG, b - bgB);
+              if (dist > 45) candidates.push({ dist, r, g, b });
+            }
+          }
+
+          if (!candidates.length) {
+            const lum = 0.299 * bgR + 0.587 * bgG + 0.114 * bgB;
+            return { bgHex, fgHex: lum < 128 ? "#ffffff" : "#000000" };
+          }
+
+          candidates.sort((a, b) => b.dist - a.dist);
+          const topN = Math.max(1, Math.floor(candidates.length * 0.25));
+          let sumR = 0, sumG = 0, sumB = 0;
+          for (let i = 0; i < topN; i++) {
+            sumR += candidates[i].r; sumG += candidates[i].g; sumB += candidates[i].b;
+          }
+          const fgHex = rgbToHex(sumR / topN, sumG / topN, sumB / topN);
+          return { bgHex, fgHex };
+        } catch (e) {
+          return { bgHex: "#ffffff", fgHex: "#000000" };
+        }
+      }
+
+      function matchPdfFont(item, styles) {
+        const rawName = (item.fontName || "").toLowerCase();
+        const styleObj = (styles && styles[item.fontName]) || {};
+        const familyStr = `${rawName} ${(styleObj.fontFamily || "").toLowerCase()}`;
+
+        const isBold = /bold|black|heavy|demi|semibold|extrab|ultrab|-b\b/i.test(familyStr);
+        const isItalic = /italic|oblique|slant|-i\b/i.test(familyStr);
+
+        let fontFamily = "sans";
+        if (/courier|mono|consolas|menlo|code|typewriter/i.test(familyStr)) {
+          fontFamily = "mono";
+        } else if (/times|serif|georgia|garamond|cambria|palatino|minion|book|roman/i.test(familyStr) && !/sans/i.test(familyStr)) {
+          fontFamily = "serif";
+        }
+        return { fontFamily, isBold, isItalic };
+      }
+
+      document.querySelectorAll("[data-sejda-tool]").forEach((btn) => {
+        btn.addEventListener("click", () => {
+          sejdaTool = btn.dataset.sejdaTool;
+          document.querySelectorAll("[data-sejda-tool]").forEach((b) => {
+            b.className = b === btn
+              ? "sejda-tool-btn px-3 py-1.5 rounded-xl text-xs font-semibold bg-brandRed text-white transition"
+              : "sejda-tool-btn px-3 py-1.5 rounded-xl text-xs font-semibold text-white/70 hover:bg-white/10 transition";
+          });
+          sejdaStatusBar.textContent = sejdaTool === "editText"
+            ? "Smart Sejda Mode: Click any text — font, text color & page background color will match automatically!"
+            : "Smart Eraser Mode: Drag on any area — background color will be auto-sampled to blend seamlessly!";
+        });
+      });
+
+      $("sejdaBoldBtn").addEventListener("click", () => {
+        sejdaBold = !sejdaBold;
+        $("sejdaBoldBtn").classList.toggle("bg-brandRed", sejdaBold);
+        $("sejdaBoldBtn").classList.toggle("text-white", sejdaBold);
+        if (activeSejdaEl && activeSejdaEl.type === "text") {
+          activeSejdaEl.bold = sejdaBold;
+          activeSejdaEl.dom.querySelector(".txt-editor").style.fontWeight = sejdaBold ? "700" : "400";
+        }
+      });
+
+      const fontFamSel = $("sejdaFontFamily");
+      if (fontFamSel) {
+        fontFamSel.addEventListener("change", (e) => {
+          if (activeSejdaEl && activeSejdaEl.type === "text") {
+            activeSejdaEl.fontFamily = e.target.value;
+            activeSejdaEl.dom.querySelector(".txt-editor").style.fontFamily = CSS_FONTS[e.target.value] || CSS_FONTS.sans;
+          }
+        });
+      }
+
+      $("sejdaFontSize").addEventListener("input", (e) => {
+        const val = parseFloat(e.target.value) || 14;
+        if (activeSejdaEl && activeSejdaEl.type === "text") {
+          activeSejdaEl.fontSize = val;
+          activeSejdaEl.dom.querySelector(".txt-editor").style.fontSize = `${val * activeSejdaEl.scale}px`;
+        }
+      });
+
+      $("sejdaColor").addEventListener("input", (e) => {
+        if (activeSejdaEl && activeSejdaEl.type === "text") {
+          activeSejdaEl.color = e.target.value;
+          activeSejdaEl.dom.querySelector(".txt-editor").style.color = e.target.value;
+        }
+      });
+
+      $("sejdaAlign").addEventListener("change", (e) => {
+        if (activeSejdaEl && activeSejdaEl.type === "text") {
+          activeSejdaEl.align = e.target.value;
+          activeSejdaEl.dom.querySelector(".txt-editor").style.textAlign = e.target.value;
+        }
+      });
+
+      function setActiveElement(el) {
+        sejdaElements.forEach((item) => item.dom.classList.toggle("is-active", item === el));
+        activeSejdaEl = el;
+        if (el && el.type === "text") {
+          $("sejdaFontSize").value = Math.round(el.fontSize);
+          $("sejdaColor").value = el.color || "#000000";
+          $("sejdaAlign").value = el.align || "left";
+          if (fontFamSel) fontFamSel.value = el.fontFamily || "sans";
+          sejdaBold = !!el.bold;
+          $("sejdaBoldBtn").classList.toggle("bg-brandRed", sejdaBold);
+        }
+      }
+
+      function removeSejdaElement(el) {
+        if (!el) return;
+        if (el.linkedWhiteout) {
+          el.linkedWhiteout.dom.remove();
+          sejdaElements = sejdaElements.filter((x) => x !== el.linkedWhiteout);
+        }
+        if (el.sourceHit) el.sourceHit.style.display = "";
+        el.dom.remove();
+        sejdaElements = sejdaElements.filter((x) => x !== el);
+        activeSejdaEl = null;
+      }
+
+      $("sejdaDeleteBtn").addEventListener("click", () => removeSejdaElement(activeSejdaEl));
+      $("sejdaUndoBtn").addEventListener("click", () => {
+        const last = sejdaElements[sejdaElements.length - 1];
+        if (last) removeSejdaElement(last);
+      });
+
+      sejdaFileInput.addEventListener("change", async () => {
+        if (!sejdaFileInput.files.length) return;
+        sejdaFile = sejdaFileInput.files[0];
+        await loadPdfIntoSejda(sejdaFile);
+      });
+
+      async function loadPdfIntoSejda(file) {
+        sejdaEmptyState.classList.add("hidden");
+        sejdaPagesContainer.replaceChildren();
+        sejdaElements = [];
+        activeSejdaEl = null;
+        $("sejdaFileInfo").textContent = `${file.name} (${(file.size / 1048576).toFixed(2)} MB) · Rendering Ultra-HD pages...`;
+
+        try {
+          const buf = await file.arrayBuffer();
+          sejdaPdfDoc = await pdfjsLib.getDocument({ data: buf }).promise;
+          const total = sejdaPdfDoc.numPages;
+          $("sejdaFileInfo").textContent = `${file.name} · ${total} page(s) · Auto Font & Color Match Active`;
+
+          const maxRender = Math.min(total, 50);
+          for (let pageNo = 1; pageNo <= maxRender; pageNo++) {
+            await renderSejdaPage(pageNo);
+          }
+        } catch (err) {
+          console.error(err);
+          sejdaStatusBar.textContent = "Failed to open PDF in editor. Ensure it is not password-protected.";
+        }
+      }
+
+      async function renderSejdaPage(pageNo) {
+        const page = await sejdaPdfDoc.getPage(pageNo);
+        const unscaledVp = page.getViewport({ scale: 1 });
+        const scale = Math.min(1.5, (Math.min(window.innerWidth - 32, 920)) / unscaledVp.width);
+        const vp = page.getViewport({ scale });
+
+        const dpr = Math.max(window.devicePixelRatio || 1, 2);
+        const hiDpiVp = page.getViewport({ scale: scale * dpr });
+
+        const pageWrap = document.createElement("div");
+        pageWrap.className = "relative shadow-2xl rounded-lg overflow-hidden bg-white select-none";
+        pageWrap.style.width = `${vp.width}px`;
+        pageWrap.style.height = `${vp.height}px`;
+
+        const canvas = document.createElement("canvas");
+        canvas.width = Math.floor(hiDpiVp.width);
+        canvas.height = Math.floor(hiDpiVp.height);
+        canvas.style.width = `${vp.width}px`;
+        canvas.style.height = `${vp.height}px`;
+        canvas.className = "block pointer-events-none";
+
+        const hitLayer = document.createElement("div");
+        hitLayer.className = "absolute inset-0 z-10";
+
+        const overlayLayer = document.createElement("div");
+        overlayLayer.className = "absolute inset-0 z-20 pointer-events-none";
+
+        pageWrap.append(canvas, hitLayer, overlayLayer);
+        sejdaPagesContainer.appendChild(pageWrap);
+
+        const ctx = canvas.getContext("2d", { willReadFrequently: true });
+        await page.render({ canvasContext: ctx, viewport: hiDpiVp }).promise;
+
+        const textContent = await page.getTextContent();
+        const styles = textContent.styles || {};
+
+        for (const item of textContent.items) {
+          const str = (item.str || "").trim();
+          if (!str) continue;
+
+          const tx = pdfjsLib.Util.transform(vp.transform, item.transform);
+          const fontHeightPx = Math.hypot(tx[2], tx[3]);
+          const leftPx = tx[4];
+          const topPx = tx[5] - fontHeightPx * 0.86;
+          const widthPx = Math.max(18, (item.width || 20) * scale);
+          const heightPx = Math.max(11, fontHeightPx * 1.15);
+
+          const hit = document.createElement("div");
+          hit.className = "sejda-text-hit";
+          hit.title = "Click to edit (Auto-matches font, text color & background color)";
+          hit.style.left = `${leftPx}px`;
+          hit.style.top = `${topPx}px`;
+          hit.style.width = `${widthPx + 4}px`;
+          hit.style.height = `${heightPx}px`;
+
+          hit.addEventListener("click", (e) => {
+            e.stopPropagation();
+            if (sejdaTool !== "editText") return;
+            hit.style.display = "none";
+
+            const { bgHex, fgHex } = detectColorsFromCanvas(ctx, leftPx, topPx, widthPx, heightPx, dpr);
+            const { fontFamily, isBold, isItalic } = matchPdfFont(item, styles);
+
+            const xPt = Math.max(0, (leftPx - 1) / scale);
+            const yPt = Math.max(0, (topPx - 0.5) / scale);
+            const coverWPt = Math.min(unscaledVp.width - xPt, (widthPx + 3) / scale);
+            const coverHPt = Math.min(unscaledVp.height - yPt, (heightPx + 2) / scale);
+            const detectedFontPt = Math.max(5, Math.min(96, Number((fontHeightPx / scale).toFixed(1))));
+
+            const wo = createSejdaElement({
+              page: pageNo,
+              type: "whiteout",
+              x: xPt,
+              y: yPt,
+              w: coverWPt,
+              h: coverHPt,
+              fill: bgHex,
+              pageWidth: unscaledVp.width,
+              pageHeight: unscaledVp.height,
+              scale,
+              overlayLayer,
+              silent: true,
+            });
+
+            const txtEl = createSejdaElement({
+              page: pageNo,
+              type: "text",
+              x: xPt,
+              y: yPt,
+              w: Math.max(coverWPt + 20, 60),
+              h: Math.max(coverHPt + 2, detectedFontPt * 1.3),
+              text: item.str,
+              fontSize: detectedFontPt,
+              fontFamily,
+              color: fgHex,
+              bold: isBold,
+              italic: isItalic,
+              align: "left",
+              pageWidth: unscaledVp.width,
+              pageHeight: unscaledVp.height,
+              scale,
+              overlayLayer,
+            });
+            txtEl.linkedWhiteout = wo;
+            txtEl.sourceHit = hit;
+            sejdaStatusBar.textContent = `Matched Font: ${fontFamily.toUpperCase()}${isBold ? " Bold" : ""} (${detectedFontPt}pt) · Text: ${fgHex} · Background: ${bgHex}`;
+          });
+
+          hitLayer.appendChild(hit);
+        }
+
+        let dragStart = null, tempBox = null;
+        hitLayer.addEventListener("pointerdown", (e) => {
+          if (e.target !== hitLayer) return;
+          const rect = hitLayer.getBoundingClientRect();
+          const px = e.clientX - rect.left;
+          const py = e.clientY - rect.top;
+
+          if (sejdaTool === "editText") {
+            const fSize = parseFloat($("sejdaFontSize").value) || 14;
+            const { bgHex } = detectColorsFromCanvas(ctx, px, py, 20, 20, dpr);
+            const r = parseInt(bgHex.slice(1, 3), 16), g = parseInt(bgHex.slice(3, 5), 16), b = parseInt(bgHex.slice(5, 7), 16);
+            const isDarkPage = (0.299 * r + 0.587 * g + 0.114 * b) < 120;
+            const curColor = $("sejdaColor").value === "#000000" && isDarkPage ? "#ffffff" : ($("sejdaColor").value || "#000000");
+
+            createSejdaElement({
+              page: pageNo,
+              type: "text",
+              x: px / scale,
+              y: py / scale,
+              w: 160,
+              h: fSize * 1.5,
+              text: "Type here",
+              fontSize: fSize,
+              fontFamily: fontFamSel ? fontFamSel.value : "sans",
+              color: curColor,
+              bold: sejdaBold,
+              italic: false,
+              align: $("sejdaAlign").value || "left",
+              pageWidth: unscaledVp.width,
+              pageHeight: unscaledVp.height,
+              scale,
+              overlayLayer,
+            });
+          } else if (sejdaTool === "whiteout") {
+            dragStart = { x: px, y: py };
+            tempBox = document.createElement("div");
+            tempBox.className = "absolute border-2 border-red-400 bg-white/40 pointer-events-none";
+            tempBox.style.left = `${px}px`;
+            tempBox.style.top = `${py}px`;
+            overlayLayer.appendChild(tempBox);
+            hitLayer.setPointerCapture(e.pointerId);
+          }
+        });
+
+        hitLayer.addEventListener("pointermove", (e) => {
+          if (!dragStart || !tempBox) return;
+          const rect = hitLayer.getBoundingClientRect();
+          const cx = Math.max(0, Math.min(rect.width, e.clientX - rect.left));
+          const cy = Math.max(0, Math.min(rect.height, e.clientY - rect.top));
+          const x = Math.min(dragStart.x, cx), y = Math.min(dragStart.y, cy);
+          const w = Math.abs(cx - dragStart.x), h = Math.abs(cy - dragStart.y);
+          tempBox.style.left = `${x}px`; tempBox.style.top = `${y}px`;
+          tempBox.style.width = `${w}px`; tempBox.style.height = `${h}px`;
+        });
+
+        hitLayer.addEventListener("pointerup", () => {
+          if (!dragStart || !tempBox) return;
+          const wPx = parseFloat(tempBox.style.width) || 0;
+          const hPx = parseFloat(tempBox.style.height) || 0;
+          const xPx = parseFloat(tempBox.style.left) || 0;
+          const yPx = parseFloat(tempBox.style.top) || 0;
+          tempBox.remove();
+          tempBox = null; dragStart = null;
+          if (wPx > 6 && hPx > 6) {
+            const { bgHex } = detectColorsFromCanvas(ctx, xPx, yPx, wPx, hPx, dpr);
+            createSejdaElement({
+              page: pageNo,
+              type: "whiteout",
+              x: xPx / scale,
+              y: yPx / scale,
+              w: wPx / scale,
+              h: hPx / scale,
+              fill: bgHex,
+              pageWidth: unscaledVp.width,
+              pageHeight: unscaledVp.height,
+              scale,
+              overlayLayer,
+            });
+          }
+        });
+      }
+
+      function createSejdaElement(cfg) {
+        const dom = document.createElement("div");
+        dom.className = "sejda-el pointer-events-auto";
+        const syncDomPos = () => {
+          dom.style.left = `${cfg.x * cfg.scale}px`;
+          dom.style.top = `${cfg.y * cfg.scale}px`;
+          dom.style.width = `${cfg.w * cfg.scale}px`;
+          dom.style.height = `${cfg.h * cfg.scale}px`;
+        };
+        syncDomPos();
+
+        const handle = document.createElement("div");
+        handle.className = "sejda-handle";
+
+        if (cfg.type === "whiteout") {
+          dom.style.background = cfg.fill || "#ffffff";
+          if (cfg.silent) dom.style.pointerEvents = "none";
+        } else {
+          const editor = document.createElement("div");
+          editor.className = "txt-editor";
+          editor.contentEditable = "true";
+          editor.textContent = cfg.text || "";
+          editor.style.fontSize = `${cfg.fontSize * cfg.scale}px`;
+          editor.style.fontFamily = CSS_FONTS[cfg.fontFamily || "sans"] || CSS_FONTS.sans;
+          editor.style.color = cfg.color || "#000000";
+          editor.style.fontWeight = cfg.bold ? "700" : "400";
+          editor.style.fontStyle = cfg.italic ? "italic" : "normal";
+          editor.style.textAlign = cfg.align || "left";
+
+          editor.addEventListener("input", () => {
+            cfg.text = editor.innerText;
+            const neededH = editor.scrollHeight / cfg.scale;
+            if (neededH > cfg.h) {
+              cfg.h = neededH + 2;
+              syncDomPos();
+            }
+            if (cfg.linkedWhiteout) {
+              const textW = Math.min(cfg.pageWidth - cfg.x, (editor.scrollWidth + 4) / cfg.scale);
+              if (textW > cfg.linkedWhiteout.w) {
+                cfg.linkedWhiteout.w = textW;
+                cfg.linkedWhiteout.dom.style.width = `${textW * cfg.scale}px`;
+              }
+            }
+          });
+          editor.addEventListener("focus", () => setActiveElement(cfg));
+          dom.appendChild(editor);
+          setTimeout(() => {
+            editor.focus();
+            document.execCommand("selectAll", false, null);
+          }, 20);
+        }
+
+        dom.appendChild(handle);
+        cfg.overlayLayer.appendChild(dom);
+        cfg.dom = dom;
+        sejdaElements.push(cfg);
+        if (!cfg.silent) setActiveElement(cfg);
+
+        let mode = null, sx = 0, sy = 0, orig = null;
+        dom.addEventListener("pointerdown", (e) => {
+          setActiveElement(cfg);
+          if (e.target === handle) {
+            mode = "resize";
+          } else if (e.target === dom || cfg.type === "whiteout") {
+            mode = "move";
+          } else if (e.altKey) {
+            mode = "move";
+          } else {
+            return;
+          }
+          e.stopPropagation();
+          sx = e.clientX; sy = e.clientY;
+          orig = { x: cfg.x, y: cfg.y, w: cfg.w, h: cfg.h };
+          dom.setPointerCapture(e.pointerId);
+        });
+
+        dom.addEventListener("pointermove", (e) => {
+          if (!mode) return;
+          const dx = (e.clientX - sx) / cfg.scale;
+          const dy = (e.clientY - sy) / cfg.scale;
+          if (mode === "move") {
+            cfg.x = Math.max(0, Math.min(cfg.pageWidth - cfg.w, orig.x + dx));
+            cfg.y = Math.max(0, Math.min(cfg.pageHeight - cfg.h, orig.y + dy));
+          } else if (mode === "resize") {
+            cfg.w = Math.max(20, Math.min(cfg.pageWidth - cfg.x, orig.w + dx));
+            cfg.h = Math.max(12, Math.min(cfg.pageHeight - cfg.y, orig.h + dy));
+          }
+          syncDomPos();
+        });
+
+        dom.addEventListener("pointerup", () => { mode = null; });
+        return cfg;
+      }
+
+      $("sejdaApplyBtn").addEventListener("click", async () => {
+        if (window.SyntaxAuth.requireAuthIfQuotaReached()) {
+          hide(sejdaModal);
+          return;
+        }
+        if (!sejdaFile) return alert("Please choose a PDF file first.");
+        const validElements = sejdaElements
+          .filter((el) => el.type === "whiteout" || (el.type === "text" && (el.text || "").trim().length > 0))
+          .map((el) => {
+            const base = {
+              page: el.page,
+              type: el.type,
+              x: Number(el.x.toFixed(2)),
+              y: Number(el.y.toFixed(2)),
+              w: Number(el.w.toFixed(2)),
+              h: Number(el.h.toFixed(2)),
+              pageWidth: Number(el.pageWidth.toFixed(2)),
+              pageHeight: Number(el.pageHeight.toFixed(2)),
+            };
+            if (el.type === "text") {
+              return {
+                ...base,
+                text: el.text,
+                fontSize: el.fontSize,
+                fontFamily: el.fontFamily || "sans",
+                color: el.color || "#000000",
+                bold: !!el.bold,
+                italic: !!el.italic,
+                align: el.align || "left",
+              };
+            }
+            return { ...base, fill: el.fill || "#ffffff" };
+          });
+
+        if (!validElements.length) {
+          sejdaStatusBar.textContent = "Click any text to edit or add a box before saving.";
+          return;
+        }
+
+        const btn = $("sejdaApplyBtn");
+        btn.disabled = true;
+        btn.textContent = "Saving High-Quality PDF...";
+
+        try {
+          if (!$("sejdaRedact").checked && window.PDFLib) {
+            const blob = await clientApplyEditsVector(sejdaFile, validElements);
+            const outName = sejdaFile.name.replace(/\.pdf$/i, "_edited.pdf");
+            download(blob, outName);
+            window.SyntaxAuth.recordSuccess();
+            sejdaStatusBar.textContent = `Saved lossless vector PDF · ${outName}!`;
+            return;
+          }
+
+          const payload = JSON.stringify({
+            version: 1,
+            redact: $("sejdaRedact").checked,
+            elements: validElements,
+          });
+          const fd = new FormData();
+          fd.append("file", sejdaFile);
+          fd.append("edits", payload);
+
+          const headers = await authHeaders();
+          const res = await fetch(API_BASE + "edit-pdf/", { method: "POST", headers, body: fd });
+          if (res.ok) {
+            const blob = await res.blob();
+            const outName = filenameFrom(res, sejdaFile.name.replace(/\.pdf$/i, "_edited.pdf"));
+            download(blob, outName);
+            window.SyntaxAuth.recordSuccess();
+            sejdaStatusBar.textContent = `Saved & downloaded ${outName}!`;
+          } else {
+            const blob = await clientApplyEditsVector(sejdaFile, validElements);
+            const outName = sejdaFile.name.replace(/\.pdf$/i, "_edited.pdf");
+            download(blob, outName);
+            window.SyntaxAuth.recordSuccess();
+            sejdaStatusBar.textContent = `Saved lossless vector PDF · ${outName}!`;
+          }
+        } catch (err) {
+          console.error(err);
+          sejdaStatusBar.textContent = "Error saving PDF.";
+        } finally {
+          btn.disabled = false;
+          btn.textContent = "Apply Changes & Download";
+        }
+      });
+
+      async function clientApplyEditsVector(file, elements) {
+        const { PDFDocument, rgb, StandardFonts } = window.PDFLib;
+        const bytes = await file.arrayBuffer();
+        const doc = await PDFDocument.load(bytes);
+
+        const fontMap = {
+          "sans-normal": await doc.embedFont(StandardFonts.Helvetica),
+          "sans-bold": await doc.embedFont(StandardFonts.HelveticaBold),
+          "sans-italic": await doc.embedFont(StandardFonts.HelveticaOblique),
+          "sans-bolditalic": await doc.embedFont(StandardFonts.HelveticaBoldOblique),
+          "serif-normal": await doc.embedFont(StandardFonts.TimesRoman),
+          "serif-bold": await doc.embedFont(StandardFonts.TimesRomanBold),
+          "serif-italic": await doc.embedFont(StandardFonts.TimesRomanItalic),
+          "serif-bolditalic": await doc.embedFont(StandardFonts.TimesRomanBoldItalic),
+          "mono-normal": await doc.embedFont(StandardFonts.Courier),
+          "mono-bold": await doc.embedFont(StandardFonts.CourierBold),
+          "mono-italic": await doc.embedFont(StandardFonts.CourierOblique),
+          "mono-bolditalic": await doc.embedFont(StandardFonts.CourierBoldOblique),
+        };
+
+        const pickFont = (el) => {
+          const fam = ["sans", "serif", "mono"].includes(el.fontFamily) ? el.fontFamily : "sans";
+          const style = el.bold && el.italic ? "bolditalic" : el.bold ? "bold" : el.italic ? "italic" : "normal";
+          return fontMap[`${fam}-${style}`] || fontMap["sans-normal"];
+        };
+
+        const hexRgb = (hex) => {
+          const c = (hex || "#000000").replace("#", "");
+          return rgb(
+            parseInt(c.slice(0, 2), 16) / 255,
+            parseInt(c.slice(2, 4), 16) / 255,
+            parseInt(c.slice(4, 6), 16) / 255
+          );
+        };
+
+        const pages = doc.getPages();
+        for (const el of elements) {
+          const p = pages[el.page - 1];
+          if (!p) continue;
+          const { width, height } = p.getSize();
+          const sx = el.pageWidth ? width / el.pageWidth : 1;
+          const sy = el.pageHeight ? height / el.pageHeight : 1;
+
+          if (el.type === "whiteout") {
+            p.drawRectangle({
+              x: el.x * sx,
+              y: height - (el.y + el.h) * sy,
+              width: el.w * sx,
+              height: el.h * sy,
+              color: hexRgb(el.fill || "#ffffff"),
+            });
+          } else if (el.type === "text") {
+            const fSize = el.fontSize * sy;
+            p.drawText(el.text, {
+              x: el.x * sx,
+              y: height - (el.y * sy) - fSize * 0.88,
+              size: fSize,
+              font: pickFont(el),
+              color: hexRgb(el.color || "#000000"),
+              lineHeight: fSize * 1.2,
+            });
+          }
+        }
+        return new Blob([await doc.save()], { type: "application/pdf" });
+      }
+
+      document.addEventListener("keydown", (e) => {
+        if (e.key === "Escape") {
+          closeModal();
+          hide(aboutModal);
+          hide(supportModal);
+          hide(privacyModal);
+          hide(termsModal);
+        }
+      });
+
       const menu = $("mobileMenu"), menuBtn = $("menuBtn");
-      menuBtn.addEventListener("click", () => {
+      menuBtn?.addEventListener("click", () => {
         const open = menu.classList.toggle("hidden") === false;
         menuBtn.setAttribute("aria-expanded", String(open));
       });
-      menu.querySelectorAll("a").forEach((a) => a.addEventListener("click", () => menu.classList.add("hidden")));
 
       $("year").textContent = new Date().getFullYear();
     })();
   </script>
 </body>
 </html>
+<!-- ================= PART 5: MOBILE RESPONSIVE FIXES & ILOVEPDF MOBILE NAVBAR & CATEGORY WRAP ================= -->
+<style>
+  /* Fix Mobile Navbar Spacing & Button Overlap */
+  @media (max-width: 1023px) {
+    header nav {
+      padding-left: 0.85rem !important;
+      padding-right: 0.85rem !important;
+    }
+    #navGuestActions {
+      gap: 0.35rem !important;
+    }
+    #navLoginBtn {
+      display: none !important; /* Hide login on very small screens, keep Sign Up */
+    }
+    #navSignupBtn {
+      padding: 0.45rem 0.85rem !important;
+      font-size: 0.75rem !important;
+    }
+  }
+
+  /* iLovePDF Style Category Pills Wrap for Mobile (Matching image_6b0ca3.png) */
+  #categoryBar {
+    display: flex !important;
+    flex-wrap: wrap !important;
+    justify-content: center !important;
+    gap: 0.45rem !important;
+    overflow-x: visible !important;
+    padding-bottom: 0 !important;
+  }
+  #categoryBar .cat-pill {
+    padding: 0.45rem 1rem !important;
+    font-size: 0.8rem !important;
+    border-radius: 9999px !important;
+  }
+</style>
+
+<script>
+  // Ensure Mobile Menu Toggle works smoothly with Hamburger Icon
+  document.addEventListener("DOMContentLoaded", () => {
+    const menu = document.getElementById("mobileMenu");
+    const menuBtn = document.getElementById("menuBtn");
+    if (menuBtn && menu) {
+      menuBtn.addEventListener("click", (e) => {
+        e.stopPropagation();
+        menu.classList.toggle("hidden");
+      });
+      document.addEventListener("click", (e) => {
+        if (!menu.contains(e.target) && !menuBtn.contains(e.target)) {
+          menu.classList.add("hidden");
+        }
+      });
+    }
+  });
+</script>
+<!-- ================= PART 6: PROFESSIONAL SaaS TYPOGRAPHY, ROUND CHECKMARKS & ARROW BUTTON ================= -->
+<link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@500;600;700;800&display=swap" rel="stylesheet">
+
+<style>
+  /* 1. Professional SaaS Font Upgrade (Plus Jakarta Sans + Inter with OpenType features) */
+  body {
+    font-family: "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif !important;
+    font-feature-settings: "cv02", "cv03", "cv04", "cv11";
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+    letter-spacing: -0.011em;
+  }
+
+  h1, h2, h3, h4, #mTitle, .cat-pill, header nav button, header nav a, #bannerSignupBtn, #navSignupBtn {
+    font-family: "Plus Jakarta Sans", "Inter", system-ui, sans-serif !important;
+    letter-spacing: -0.025em;
+  }
+
+  /* Keep SyntaxPDF Logo ultra-bold & tight */
+  .syntax-logo {
+    font-family: "Inter", system-ui, sans-serif !important;
+    font-weight: 900 !important;
+    letter-spacing: -0.045em !important;
+  }
+
+  /* 2. Fix Green Checkmark Circles (Never stretch or squish into ovals on mobile!) */
+  .pro-check-circle {
+    width: 22px !important;
+    height: 22px !important;
+    min-width: 22px !important;
+    min-height: 22px !important;
+    border-radius: 9999px !important;
+    flex-shrink: 0 !important;
+    display: inline-flex !important;
+    align-items: center !important;
+    justify-content: center !important;
+    background-color: #10b981 !important;
+    color: #ffffff !important;
+    box-shadow: 0 2px 6px rgba(16, 185, 129, 0.28);
+    margin-top: 2px;
+  }
+</style>
+
+<script>
+  document.addEventListener("DOMContentLoaded", () => {
+    // 1. Replace squished green ticks with perfect round SVG checkmarks
+    document.querySelectorAll("ul li").forEach((li) => {
+      const badge = li.querySelector("span.bg-emerald-600");
+      if (badge) {
+        li.classList.remove("items-center");
+        li.classList.add("items-start");
+        badge.className = "pro-check-circle";
+        badge.innerHTML = `
+          <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round">
+            <polyline points="20 6 9 17 4 12"></polyline>
+          </svg>
+        `;
+      }
+    });
+
+    // 2. Replace Crown Emoji on "Create Free Account" button with a sleek Arrow (----->)
+    const bannerBtn = document.getElementById("bannerSignupBtn");
+    if (bannerBtn) {
+      bannerBtn.className = "group mt-7 inline-flex items-center gap-2.5 px-6 py-3.5 rounded-xl bg-[#f5c518] hover:bg-[#eab308] text-slate-900 font-extrabold text-sm shadow-sm transition-all duration-200";
+      bannerBtn.innerHTML = `
+        <span>Create Free Account</span>
+        <svg class="w-5 h-5 transition-transform duration-200 group-hover:translate-x-1.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+          <line x1="4" y1="12" x2="20" y2="12"></line>
+          <polyline points="14 6 20 12 14 18"></polyline>
+        </svg>
+      `;
+    }
+  });
+</script>
+<!-- ================= PART 7: FIX MODAL ICONS, REMOVE RED GLOW, ADD DEEP BLUR & SOFTEN RED BUTTONS ================= -->
+<style>
+  /* 1. Fix Modal Header Icons (#mIcon & Support Icon) so they NEVER squish or stretch! */
+  #mIcon,
+  #supportModal .flex.items-center.gap-3 > span:first-child {
+    width: 48px !important;
+    height: 48px !important;
+    min-width: 48px !important;
+    min-height: 48px !important;
+    flex-shrink: 0 !important;
+    border-radius: 14px !important;
+    display: inline-flex !important;
+    align-items: center !important;
+    justify-content: center !important;
+    padding: 11px !important;
+    box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.15) !important;
+  }
+
+  #mIcon svg,
+  #supportModal .flex.items-center.gap-3 > span:first-child svg {
+    width: 24px !important;
+    height: 24px !important;
+  }
+
+  /* 2. Remove Red Light Glow from Modals & Add Clean Frosted Blur Backdrop */
+  #toolModal,
+  #supportModal,
+  #aboutModal,
+  #privacyModal,
+  #termsModal {
+    background-color: rgba(10, 12, 20, 0.68) !important;
+    -webkit-backdrop-filter: blur(18px) saturate(140%) !important;
+    backdrop-filter: blur(18px) saturate(140%) !important;
+  }
+
+  .shadow-glow,
+  #toolForm,
+  #supportModal > div,
+  #aboutModal > div,
+  #privacyModal > div,
+  #termsModal > div {
+    box-shadow: 0 24px 60px rgba(0, 0, 0, 0.65), 0 0 0 1px rgba(255, 255, 255, 0.10) !important;
+    background: linear-gradient(145deg, rgba(26, 27, 38, 0.96), rgba(16, 17, 24, 0.98)) !important;
+  }
+
+  /* 3. Tone Down Red Buttons (No Neon Red Glow, Softer Professional Matte Red) */
+  #mSubmit,
+  #sejdaApplyBtn,
+  #navSignupBtn,
+  #supportModal button[type="submit"],
+  #supportModal a.bg-brandRed {
+    background-color: #d63630 !important;
+    background-image: none !important;
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.28) !important;
+    transition: background-color 0.18s ease, transform 0.15s ease !important;
+  }
+
+  #mSubmit:hover,
+  #sejdaApplyBtn:hover,
+  #navSignupBtn:hover,
+  #supportModal button[type="submit"]:hover,
+  #supportModal a.bg-brandRed:hover {
+    background-color: #bf2b26 !important;
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.35) !important;
+  }
+</style>
+
+<script>
+  document.addEventListener("DOMContentLoaded", () => {
+    // Replace text emoji "✉" in Support Modal with a crisp, centered SVG Mail Icon
+    const supportBadge = document.querySelector("#supportModal .flex.items-center.gap-3 > span:first-child");
+    if (supportBadge) {
+      supportBadge.className = "bg-white/10 text-white ring-1 ring-white/15";
+      supportBadge.innerHTML = `
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <rect x="2" y="4" width="20" height="16" rx="3"></rect>
+          <path d="m22 7-8.97 5.7a1.94 1.94 0 0 1-2.06 0L2 7"></path>
+        </svg>
+      `;
+    }
+  });
+</script>
